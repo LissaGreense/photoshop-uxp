@@ -90,8 +90,9 @@ await selectRect(228, M, 230, M + 90);             // 2px hairline rule
 await fillLayer(doc, ACCENT, "rule"); await deselect();
 
 // Display headline — Didot, oversized, lower third, tight stack (one layer per line).
-await addText(doc, "Drink",      "h1", { x: M, y: 880,  size: 184, tracking: -10, font: "Didot",        color: INK });
-await addText(doc, "More Water", "h2", { x: M, y: 1050, size: 184, tracking: -10, font: "Didot",        color: INK });
+// Size is set by the LONGEST line ("More Water") fitting inside the right margin.
+await addText(doc, "Drink",      "h1", { x: M, y: 890,  size: 158, tracking: -10, font: "Didot",        color: INK });
+await addText(doc, "More Water", "h2", { x: M, y: 1048, size: 158, tracking: -10, font: "Didot",        color: INK });
 
 // Caption — serif italic, quiet, near the bottom margin.
 await addText(doc, "Aim for eight glasses a day.", "caption", { x: M, y: 1245, size: 40, font: "Baskerville-Italic", color: INK });
