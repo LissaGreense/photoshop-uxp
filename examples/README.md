@@ -30,9 +30,10 @@ explicit font, size, tracking, and color on a warm-paper palette.
 ![poster](01-new-poster/preview.jpg)
 
 ### 02 — Photo cover · *bold geometric voice*
-Place an external image via a session token, scale it to **cover** a band and
-recenter, lay a flat color band as a clean divide, and set heavy condensed
-Futura caps over it.
+Place an external image via a session token and scale it to **cover** the frame.
+The sharp subject sits low, so the crop is **anchored to the bottom** to keep it,
+and the caption strip goes up top over the soft area — covering nothing — with a
+masthead title in heavy condensed Futura caps.
 
 ![cover](02-place-cover/preview.jpg)
 

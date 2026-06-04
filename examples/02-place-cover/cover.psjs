@@ -1,7 +1,8 @@
 /* ============================================================================
- * EXAMPLE 02 — Place a photo into an editorial cover (photo / paper split)
+ * EXAMPLE 02 — Place a photo into a clean, photo-forward cover
  * Shows: place an external image (session token), scale-to-COVER a band +
- *        recenter, a clean paper divide (no muddy scrim), and editorial type.
+ *        recenter, a thin caption strip so the photo dominates, and a masthead
+ *        title — heavy condensed Futura caps with airy tracking.
  *
  * Place needs an ABSOLUTE path. Point INPUT at this folder's source.jpg in
  * your checkout, then run (Photoshop must be running):
@@ -70,39 +71,38 @@ async function addText(doc, text, name, o) {  // font/size/tracking/color all ex
 }
 
 // ============================ YOUR WORK BELOW ===============================
-// STYLE: bold / geometric — a flat color band and heavy Futura caps (a totally
-// different voice from 01's editorial serif). Same place/cover mechanics.
 const INPUT = "/Users/sara/Projects/adobe_skills/examples/02-place-cover/source.jpg";  // ← absolute path to this folder's source.jpg
-const W = 1600, H = 900, M = 90, SPLIT = 560;      // photo fills the top to SPLIT; color band below
-const OXBLOOD = [112, 40, 36], CREAM = [241, 236, 226], GOLD = [201, 162, 92];
+const W = 1600, H = 1000, STRIP = 120, M = 96;
+const CREAM = [240, 236, 228], GOLD = [206, 170, 110];
 
 const doc = await app.createDocument({ width: W, height: H, resolution: 72, name: "cover", fill: "white" });
-await deselect();
-await fillLayer(doc, OXBLOOD, "base");             // base layer — any gap reads as the band color
 
-// Place the photo; scale to COVER the top band (W × SPLIT), then recenter into it.
+// Place + scale to COVER the full frame.
 const entry = await fs.getEntryWithUrl("file:" + INPUT);   // single slash after file:
 const token = await fs.createSessionToken(entry);
 await bp([{ _obj: "placeEvent", null: { _path: token, _kind: "local" },
   freeTransformCenterState: { _enum: "quadCenterState", _value: "QCSAverage" } }], "place");
 const img = doc.activeLayers[0]; img.name = "photo";
-const b = img.bounds, pct = Math.max(W / (b.right - b.left), SPLIT / (b.bottom - b.top)) * 100;
+const b = img.bounds, pct = Math.max(W / (b.right - b.left), H / (b.bottom - b.top)) * 100;
 await bp([{ _obj: "transform", _target: [{ _ref: "layer", _enum: "ordinal", _value: "targetEnum" }],
   freeTransformCenterState: { _enum: "quadCenterState", _value: "QCSAverage" },
   width: { _unit: "percentUnit", _value: pct }, height: { _unit: "percentUnit", _value: pct },
   interfaceIconFrameDimmed: { _enum: "interpolationType", _value: "bicubic" } }], "cover");
+// Anchor the crop to the BOTTOM (not centered): the in-focus subject sits low in
+// this frame, so keep it and let the soft top crop away.
 const nb = img.bounds;
-img.translate(W / 2 - (nb.left + nb.right) / 2, SPLIT / 2 - (nb.top + nb.bottom) / 2);
+img.translate(W / 2 - (nb.left + nb.right) / 2, H - nb.bottom);
 
-// Flat color band over the photo's lower edge → a crisp, intentional divide (not a scrim).
-await selectRect(SPLIT, 0, H, W);
-await fillLayer(doc, OXBLOOD, "band");
+// Caption strip at the TOP, over the soft out-of-focus area — keeps the sharp
+// subject at the bottom completely uncovered.
+await selectRect(0, 0, STRIP, W);
+await fillLayer(doc, [20, 19, 17], "strip");
 await deselect();
 
-// Bold geometric type: heavy condensed Futura caps + a tracked label.
-await addText(doc, "FIELD NOTES · 02", "kicker", { x: M, y: SPLIT + 75, size: 26, tracking: 280, font: "Futura-Medium", color: GOLD });
-await addText(doc, "STILL WATERS", "title", { x: M, y: SPLIT + 215, size: 120, tracking: 20, font: "Futura-CondensedExtraBold", color: CREAM });
+// Masthead title (airy tracking so it reads as a title, not a caption) + a quiet folio.
+await addText(doc, "STILL WATERS", "title", { x: M, y: 82, size: 58, tracking: 60, font: "Futura-CondensedExtraBold", color: CREAM });
+await addText(doc, "FIELD NOTES · 02", "folio", { x: W - M - 250, y: 76, size: 19, tracking: 260, font: "Futura-Medium", color: GOLD });
 
-await emit(doc, { note: "02 — bold geometric photo cover" });
+await emit(doc, { note: "02 — photo-forward cover, subject anchored, caption up top" });
 await doc.closeWithoutSaving();   // we created this doc → close it so runs don't pile up tabs
 // ===========================================================================
