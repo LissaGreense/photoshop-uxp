@@ -39,9 +39,15 @@ photoshop-uxp/
 - Validated `batchPlay` recipes for solid/gradient fills, image placement (session tokens), non-destructive adjustments (curves, B&W, vignette), compound selections, masks, and smart objects — including quirks like the `RGBColor` `grain` (green) key and the `\n`-renders-as-tofu trap.
 - Sizing heuristics (margins, type scale, line length, contrast) so the first attempt isn't amateur.
 
-## Using it with Claude Code
+## Install
 
-Drop the `photoshop-uxp/` directory into your skills folder (or install the `.skill` package). The agent loads `SKILL.md`, then pulls in references progressively as a task demands.
+Via [skills.sh](https://skills.sh) / the `skills` CLI:
+
+```bash
+npx skills add LissaGreense/photoshop-uxp
+```
+
+Or grab it manually — drop the `photoshop-uxp/` directory into your agent's skills folder (e.g. `.claude/skills/`), or install the packaged `photoshop-uxp.skill`. The agent loads `SKILL.md`, then pulls in references progressively as a task demands.
 
 ## Requirements
 
