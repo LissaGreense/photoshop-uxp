@@ -6,7 +6,9 @@ It gives an AI agent everything it needs to automate, generate, edit, retouch, o
 
 ## Why this exists
 
-Photoshop has almost no agent tooling. UXP scripting is the modern, native automation path, but it's full of silent foot-guns: fills that no-op, text that lands black-on-black, images that place off-canvas — all returning `errors: []`. This skill bakes in the hard-won facts and a result-readback convention so an agent doesn't fly blind.
+I don't like wasting time nudging layers around in Photoshop. I'd rather tell an agent "make the cover" and let it do the pixel-pushing.
+
+Problem is, Photoshop has almost no agent tooling. UXP scripting is the modern native path, but it's full of silent foot-guns: fills that no-op, text that lands black-on-black, images that place off-canvas — all returning `errors: []`. So I baked the hard-won facts and a result-readback convention into one skill, so the agent doesn't fly blind.
 
 **Core principle:** `errors: []` ≠ correct. Only the rendered pixels are truth. Every non-trivial job is a loop — attempt → export preview → *look* → fix → re-render.
 
