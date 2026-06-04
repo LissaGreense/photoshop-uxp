@@ -28,6 +28,18 @@ Photoshop only. Lightroom Classic = Lua SDK, Lightroom cloud = REST — these pa
 
 Ambiguous (open doc *or* new)? **Ask** — wrong document burns a whole iteration.
 
+How you acquired the doc decides how you treat it through the whole loop and how you tear down:
+
+| | **You created / opened it** | **It was already open (the user's)** |
+|---|---|---|
+| Posture | you own it | you're a guest |
+| Edits | anything goes | **non-destructive** — adjustment layers, duplicate before mutating, don't flatten |
+| Atomicity | nice to have | **required** — wrap the run in history suspension so it's one undo |
+| Preview | `emit()` as a copy | `emit()` as a copy — never alter the doc to render |
+| Teardown | **close it** (`await doc.closeWithoutSaving()`) or tabs pile up across runs | **never** close or save over it — leave it exactly recoverable |
+
+The verify loop is the same either way — **attempt → emit → look → adjust** — but on the user's doc every iteration must stay undoable, and you exit having added recoverable layers, not having replaced their work.
+
 ## Sizing sense (so attempt #1 isn't amateur)
 
 Work in proportions of the canvas height `H`, not magic pixels:
@@ -55,4 +67,5 @@ Starting points, not laws — render and adjust.
 - [ ] DOM where it exists, batchPlay where it doesn't
 - [ ] Multi-step edits wrapped in history suspension (undo as one unit)
 - [ ] emit() preview + state at the end; rendered and actually looked at
+- [ ] Teardown: closed docs you created; left the user's open doc untouched & recoverable
 ```
