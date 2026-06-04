@@ -1,0 +1,292 @@
+/**
+ * photo-bw.psjs — Moody cinematic black & white, non-destructively.
+ *
+ * Intent (from user): "I have a photo open. Turn it into a moody, cinematic
+ * black-and-white — rich contrast, slightly crushed blacks, and a soft vignette
+ * to draw the eye to the center. Don't destroy the original."
+ *
+ * Approach (per photoshop-uxp SKILL.md):
+ *  - Operate on the ALREADY-OPEN active document; guard against no-doc.
+ *  - Non-destructive ADJUSTMENT LAYERS only (Black & White + Curves). The
+ *    original pixel layer is never touched.
+ *  - Vignette as a separate, re-editable Curves adjustment masked with a soft
+ *    radial gradient (darkens the edges, leaves the center bright).
+ *  - This is a .psjs script → already modal → NO core.executeAsModal.
+ *  - Collect non-fatal failures into errors[] instead of aborting.
+ *  - Emit preview.jpg + state.json to the temp folder (result-readback contract).
+ *
+ * Creative choices (concrete, tuned for "moody cinematic"):
+ *  - Black & White mix: pull reds/yellows down a touch for dramatic skies/skin,
+ *    keep blues low so they go dark and brooding.
+ *  - Contrast: an S-curve — lift highlights slightly, deepen the lower mids.
+ *  - Crushed blacks: raise the black input point so the darkest tones clip to
+ *    near-black, plus a lifted-then-dropped shadow region for that "filmic" toe.
+ *  - Vignette: ~-55 mid/shadow pull at the edges, feathered ~65% radial, soft.
+ */
+
+const { app, action, constants } = require("photoshop");
+const { localFileSystem: fs } = require("uxp").storage;
+const { executionContext } = require("uxp").script;
+
+const errors = [];
+const notes = [];
+
+/** Run a batchPlay step and record any error-shaped result instead of throwing. */
+async function bp(descriptors, label, options = {}) {
+  try {
+    const results = await action.batchPlay(descriptors, {
+      dialogOptions: "dontDisplay",
+      ...options,
+    });
+    for (const r of results) {
+      if (r && r._obj === "error") {
+        errors.push({ step: label, message: r.message || "unknown batchPlay error", result: r.result });
+      }
+    }
+    return results;
+  } catch (e) {
+    errors.push({ step: label, message: String(e && e.message ? e.message : e) });
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 1. RESOLVE TARGET — the already-open active document, with a hard guard.
+// ---------------------------------------------------------------------------
+if (app.documents.length === 0) {
+  // Fail loudly: there is nothing to act on. (Per intent routing in SKILL.md.)
+  throw new Error("No document open — open a photo first, then re-run.");
+}
+const doc = app.activeDocument;
+const W = doc.width;
+const H = doc.height;
+
+// Make all edits collapse into one undo step and roll back cleanly on failure.
+await executionContext.hostControl.suspendHistory({
+  documentID: doc.id,
+  name: "Agent: moody cinematic B&W",
+});
+
+try {
+  // -------------------------------------------------------------------------
+  // 2A. BLACK & WHITE adjustment layer (non-destructive desaturation w/ control)
+  //     A Black & White adj layer converts to grayscale while letting us weight
+  //     each source color — far more cinematic than a flat desaturate.
+  // -------------------------------------------------------------------------
+  await bp([{
+    _obj: "make",
+    _target: [{ _ref: "adjustmentLayer" }],
+    using: {
+      _obj: "adjustmentLayer",
+      type: {
+        _obj: "blackAndWhite",
+        // Per-channel weights (%). Lower = that color renders darker.
+        // Moody recipe: brooding blue skies, slightly darker reds/yellows.
+        red:     40,
+        yellow:  50,
+        green:   40,
+        cyan:    50,
+        blue:    20,
+        magenta: 70,
+        useTint: false,
+      },
+    },
+    _options: { dialogOptions: "dontDisplay" },
+  }], "make Black & White adjustment");
+  try { doc.activeLayers[0].name = "BW — cinematic mix"; } catch (e) { errors.push({ step: "name BW layer", message: String(e) }); }
+
+  // -------------------------------------------------------------------------
+  // 2B. CURVES adjustment — rich contrast + crushed blacks.
+  //     Composite RGB curve:
+  //       (0,0)    raise black INPUT to ~22 → crush the deepest shadows.
+  //       (64,40)  pull lower-mids down → deeper, moodier shadows (filmic toe).
+  //       (128,128) pivot.
+  //       (192,205) lift upper-mids/highlights a touch → glow, keeps it rich.
+  //       (255,255) clean white point (don't blow it out — moody, not bright).
+  //     Curve points are {horizontal: input 0-255, vertical: output 0-255}.
+  // -------------------------------------------------------------------------
+  await bp([{
+    _obj: "make",
+    _target: [{ _ref: "adjustmentLayer" }],
+    using: {
+      _obj: "adjustmentLayer",
+      type: {
+        _obj: "curves",
+        adjustment: [{
+          _obj: "curvesAdjustment",
+          channel: { _ref: "channel", _enum: "channel", _value: "composite" },
+          curve: [
+            { _obj: "paint", horizontal: 22,  vertical: 0   },
+            { _obj: "paint", horizontal: 64,  vertical: 40  },
+            { _obj: "paint", horizontal: 128, vertical: 128 },
+            { _obj: "paint", horizontal: 192, vertical: 205 },
+            { _obj: "paint", horizontal: 255, vertical: 255 },
+          ],
+        }],
+      },
+    },
+    _options: { dialogOptions: "dontDisplay" },
+  }], "make Curves (contrast + crushed blacks)");
+  try { doc.activeLayers[0].name = "Contrast + crushed blacks"; } catch (e) { errors.push({ step: "name curves layer", message: String(e) }); }
+
+  // -------------------------------------------------------------------------
+  // 2C. VIGNETTE — a darkening Curves adjustment, masked with a soft radial
+  //     gradient so only the EDGES darken and the CENTER stays bright.
+  //
+  //     Strategy:
+  //       (a) Make a Curves layer that pulls the whole image down (darken).
+  //       (b) Replace its layer mask with a radial gradient: white at the
+  //           edges (full darkening) → black at the center (no darkening).
+  //           Black conceals the adjustment, white reveals it.
+  // -------------------------------------------------------------------------
+  await bp([{
+    _obj: "make",
+    _target: [{ _ref: "adjustmentLayer" }],
+    using: {
+      _obj: "adjustmentLayer",
+      type: {
+        _obj: "curves",
+        adjustment: [{
+          _obj: "curvesAdjustment",
+          channel: { _ref: "channel", _enum: "channel", _value: "composite" },
+          // Pull mids/shadows down ~55 levels; highlights down ~25. Soft, not black.
+          curve: [
+            { _obj: "paint", horizontal: 0,   vertical: 0   },
+            { _obj: "paint", horizontal: 128, vertical: 73  },
+            { _obj: "paint", horizontal: 255, vertical: 230 },
+          ],
+        }],
+      },
+    },
+    _options: { dialogOptions: "dontDisplay" },
+  }], "make Vignette (darkening curve)");
+
+  let vignetteLayer = null;
+  try {
+    vignetteLayer = doc.activeLayers[0];
+    vignetteLayer.name = "Vignette";
+  } catch (e) { errors.push({ step: "grab vignette layer", message: String(e) }); }
+
+  // Target the vignette layer's MASK channel, then draw a radial gradient into it.
+  // The adjustment layer is created WITH a full-white mask; we overwrite it so the
+  // center is black (hidden) and edges white (revealed) → classic vignette.
+  if (vignetteLayer) {
+    try { doc.activeLayers = [vignetteLayer]; } catch (e) {}
+
+    // Select the layer mask as the active painting target.
+    await bp([{
+      _obj: "select",
+      _target: [{ _ref: "channel", _enum: "channel", _value: "mask" }],
+      _options: { dialogOptions: "dontDisplay" },
+    }], "select vignette mask channel");
+
+    // Radial gradient: black at center → white at the corners.
+    // from = center of canvas; to = roughly a corner-ish radius (~62% of the
+    // diagonal-ish) so the falloff is soft and reaches the edges.
+    const cx = W / 2;
+    const cy = H / 2;
+    const radius = Math.max(W, H) * 0.62; // soft, generous falloff
+
+    await bp([{
+      _obj: "gradientClassEvent",
+      from: { _obj: "paint", horizontal: { _unit: "pixelsUnit", _value: cx }, vertical: { _unit: "pixelsUnit", _value: cy } },
+      to:   { _obj: "paint", horizontal: { _unit: "pixelsUnit", _value: cx }, vertical: { _unit: "pixelsUnit", _value: cy - radius } },
+      type: { _enum: "gradientType", _value: "radial" },
+      gradient: {
+        _obj: "gradientClassEvent",
+        gradientForm: { _enum: "gradientForm", _value: "customStops" },
+        interfaceIconFrameDimmed: 4096,
+        colors: [
+          { _obj: "colorStop",
+            color: { _obj: "RGBColor", red: 0,   grain: 0,   blue: 0   }, // center: black → hides darkening
+            type: { _enum: "colorStopType", _value: "userStop" },
+            location: 0, midpoint: 50 },
+          { _obj: "colorStop",
+            color: { _obj: "RGBColor", red: 255, grain: 255, blue: 255 }, // edge: white → reveals darkening
+            type: { _enum: "colorStopType", _value: "userStop" },
+            location: 4096, midpoint: 50 },
+        ],
+        transparency: [
+          { _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 100 }, location: 0,    midpoint: 50 },
+          { _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 100 }, location: 4096, midpoint: 50 },
+        ],
+      },
+      _options: { dialogOptions: "dontDisplay" },
+    }], "draw radial gradient into vignette mask");
+
+    // Re-select the composite/RGB channel so subsequent ops aren't stuck on the mask.
+    await bp([{
+      _obj: "select",
+      _target: [{ _ref: "channel", _enum: "channel", _value: "RGB" }],
+      _options: { dialogOptions: "dontDisplay" },
+    }], "reselect RGB channel");
+  }
+} finally {
+  await executionContext.hostControl.resumeHistory(doc.id);
+}
+
+// ---------------------------------------------------------------------------
+// 3. EMIT RESULTS — preview.jpg + state.json to the temp folder.
+// ---------------------------------------------------------------------------
+function snapshotLayer(layer) {
+  const node = {
+    id: layer.id,
+    name: layer.name,
+    kind: String(layer.kind),
+    visible: layer.visible,
+    opacity: layer.opacity,
+    blendMode: String(layer.blendMode),
+    bounds: layer.bounds && {
+      left: layer.bounds.left, top: layer.bounds.top,
+      right: layer.bounds.right, bottom: layer.bounds.bottom,
+    },
+  };
+  if (layer.layers && layer.layers.length) node.children = layer.layers.map(snapshotLayer);
+  return node;
+}
+
+let outDir = null;
+try {
+  const out = await fs.getTemporaryFolder();
+
+  // a) preview — flattened COPY so we never disturb the working document.
+  try {
+    const previewFile = await out.createFile("preview.jpg", { overwrite: true });
+    await doc.saveAs.jpg(previewFile, { quality: 8 }, /* asCopy */ true);
+    notes.push("preview: " + previewFile.nativePath);
+    outDir = previewFile.nativePath;
+  } catch (e) {
+    errors.push({ step: "export preview.jpg", message: String(e && e.message ? e.message : e) });
+  }
+
+  // b) state JSON — structured truth for the agent to reason over.
+  try {
+    const state = {
+      intent: "moody cinematic black & white: rich contrast, crushed blacks, soft center vignette; non-destructive",
+      document: {
+        id: doc.id, name: doc.title,
+        width: doc.width, height: doc.height, resolution: doc.resolution,
+      },
+      activeLayers: doc.activeLayers.map(l => l.name),
+      layers: doc.layers.map(snapshotLayer),
+      creativeChoices: {
+        blackAndWhiteMix: { red: 40, yellow: 50, green: 40, cyan: 50, blue: 20, magenta: 70 },
+        contrastCurve: "S-curve, black input lifted to 22 (crushed blacks), lower-mids pulled to 40, highlights to 205",
+        vignette: "radial mask, center black (untouched) → edges white (darkened ~55 levels), falloff ~0.62*max(W,H)",
+      },
+      notes,
+      errors,
+    };
+    const stateFile = await out.createFile("state.json", { overwrite: true });
+    await stateFile.write(JSON.stringify(state, null, 2));
+    notes.push("state: " + stateFile.nativePath);
+  } catch (e) {
+    errors.push({ step: "write state.json", message: String(e && e.message ? e.message : e) });
+  }
+} catch (e) {
+  errors.push({ step: "resolve temp folder", message: String(e && e.message ? e.message : e) });
+}
+
+// console.log is not externally visible, but harmless for a human watching the console.
+console.log("photo-bw done. errors:", JSON.stringify(errors));
+console.log("OUTPUT:", outDir);

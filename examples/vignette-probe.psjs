@@ -1,0 +1,52 @@
+/* vignette-probe.psjs — isolate the vignette on a FLAT GRAY field.
+ * If the masked-gradient vignette works: center stays mid-gray, corners darken.
+ * If the mask paint no-ops: whole field uniformly dark (mask all white) or
+ * unchanged (mask all black). Unambiguous on a flat field. */
+const { app, action, constants } = require("photoshop");
+const { localFileSystem: fs } = require("uxp").storage;
+const errors = [];
+async function bp(desc, label) {
+  const r = await action.batchPlay(desc, { continueOnError: true });
+  for (const x of r) if (x && x._obj === "error") errors.push({ label, message: x.message });
+  return r;
+}
+const W = 800, H = 800;
+const doc = await app.createDocument({ width: W, height: H, resolution: 72, name: "vignette-probe", fill: "white" });
+
+// flat mid-gray base
+await bp([{ _obj: "make", _target: [{ _ref: "contentLayer" }],
+  using: { _obj: "contentLayer", type: { _obj: "solidColorLayer",
+    color: { _obj: "RGBColor", red: 128, grain: 128, blue: 128 } } } }], "gray fill");
+
+// darkening curves adjustment (whole-image until masked)
+await bp([{ _obj: "make", _target: [{ _ref: "adjustmentLayer" }],
+  using: { _obj: "adjustmentLayer", type: { _obj: "curves",
+    adjustment: [{ _obj: "curvesAdjustment",
+      channel: { _ref: "channel", _enum: "channel", _value: "composite" },
+      curve: [{ _obj: "paint", horizontal: 0, vertical: 0 }, { _obj: "paint", horizontal: 128, vertical: 40 }, { _obj: "paint", horizontal: 255, vertical: 150 }] }] } } }], "darken curves");
+const vig = doc.activeLayers[0];
+
+// ---- APPROACH A: the agent's — `select` the mask channel, then gradientClassEvent
+doc.activeLayers = [vig];
+await bp([{ _obj: "select", _target: [{ _ref: "channel", _enum: "channel", _value: "mask" }] }], "select mask channel");
+const cx = W / 2, cy = H / 2, radius = Math.max(W, H) * 0.62;
+await bp([{ _obj: "gradientClassEvent",
+  from: { _obj: "paint", horizontal: { _unit: "pixelsUnit", _value: cx }, vertical: { _unit: "pixelsUnit", _value: cy } },
+  to:   { _obj: "paint", horizontal: { _unit: "pixelsUnit", _value: cx }, vertical: { _unit: "pixelsUnit", _value: cy - radius } },
+  type: { _enum: "gradientType", _value: "radial" },
+  gradient: { _obj: "gradientClassEvent",
+    gradientForm: { _enum: "gradientForm", _value: "customStops" }, interfaceIconFrameDimmed: 4096,
+    colors: [
+      { _obj: "colorStop", color: { _obj: "RGBColor", red: 0, grain: 0, blue: 0 }, type: { _enum: "colorStopType", _value: "userStop" }, location: 0, midpoint: 50 },
+      { _obj: "colorStop", color: { _obj: "RGBColor", red: 255, grain: 255, blue: 255 }, type: { _enum: "colorStopType", _value: "userStop" }, location: 4096, midpoint: 50 } ],
+    transparency: [
+      { _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 100 }, location: 0, midpoint: 50 },
+      { _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 100 }, location: 4096, midpoint: 50 } ] } }], "radial gradient into mask");
+await bp([{ _obj: "select", _target: [{ _ref: "channel", _enum: "channel", _value: "RGB" }] }], "reselect RGB");
+
+// emit
+const out = await fs.getTemporaryFolder();
+const pf = await out.createFile("preview.jpg", { overwrite: true });
+await doc.saveAs.jpg(pf, { quality: 9 }, true);
+const sf = await out.createFile("state.json", { overwrite: true });
+await sf.write(JSON.stringify({ probe: "vignette-on-flat-gray", errors }, null, 2));

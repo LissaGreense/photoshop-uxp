@@ -1,0 +1,368 @@
+/**
+ * water-pretty.psjs
+ * Builds a polished "drink more water" social post (NEW document).
+ *
+ * Design:
+ *   - 1080x1350 portrait canvas (IG portrait)
+ *   - water.jpg placed full-bleed as background, scaled to cover
+ *   - dark vertical gradient scrim for text legibility
+ *   - teal accent band at the bottom + a bright cyan accent rule
+ *   - headline / subhead / hashtag tag with explicit colors
+ *
+ * Conventions (per photoshop-uxp SKILL.md):
+ *   - This is a .psjs script: ALREADY MODAL. No core.executeAsModal wrappers.
+ *   - DOM-first, batchPlay for the gaps (placed image, fill/gradient layers,
+ *     layer styles, precise text styling).
+ *   - Non-fatal failures collected into errors[] in state.json; never abort
+ *     the whole run on a single step.
+ *   - Emits preview.jpg + state.json to the temp folder.
+ */
+
+const { app, action, constants } = require("photoshop");
+const { localFileSystem: fs } = require("uxp").storage;
+const { executionContext } = require("uxp").script;
+
+const errors = [];
+
+/** Run a batchPlay step, check the error shape, and record non-fatal failures.
+ * @param {string} step human-readable step label
+ * @param {object[]} descriptors actionJSON command array
+ * @param {object} [options] batchPlay options
+ * @returns {Promise<any[]|null>} results array, or null if the step failed
+ */
+async function bp(step, descriptors, options = {}) {
+  try {
+    const results = await action.batchPlay(descriptors, { continueOnError: true, ...options });
+    for (const r of results || []) {
+      if (r && r._obj === "error") {
+        errors.push({ step, message: r.message || "unknown batchPlay error", result: r.result });
+        return null;
+      }
+    }
+    return results;
+  } catch (e) {
+    errors.push({ step, message: String(e && e.message ? e.message : e) });
+    return null;
+  }
+}
+
+/** Wrap a risky DOM step so it records but doesn't abort the run.
+ * @param {string} step label
+ * @param {() => Promise<any>} fn the work
+ * @returns {Promise<any|null>}
+ */
+async function tryStep(step, fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    errors.push({ step, message: String(e && e.message ? e.message : e) });
+    return null;
+  }
+}
+
+// ---- Palette ------------------------------------------------------------
+// actionJSON RGBColor uses keys: red / grain (=green) / blue.  (skill quirk)
+const C = {
+  deepTeal:   { red: 6,   grain: 38,  blue: 53  },  // #062635 band
+  brightCyan: { red: 56,  grain: 211, blue: 255 },  // #38D3FF accent
+  white:      { red: 255, grain: 255, blue: 255 },
+  ink:        { red: 4,   grain: 22,  blue: 34  },  // near-black scrim base
+};
+
+const W = 1080;
+const H = 1350;
+
+// ---- 1. RESOLVE TARGET --------------------------------------------------
+// Intent: "Make a ... social post" + "This is a NEW document." -> createDocument.
+const doc = await app.createDocument({
+  width: W,
+  height: H,
+  resolution: 72,
+  name: "drink-water-post",
+  fill: "white",
+});
+
+// Make the whole build a single, atomic undo step.
+await executionContext.hostControl.suspendHistory({
+  documentID: doc.id,
+  name: "Agent: build water post",
+});
+
+try {
+  // ---- 2. BACKGROUND: place water.jpg full-bleed -----------------------
+  // The skill flags "place embedded/linked file" as a DOM gap requiring a
+  // placeEvent descriptor + filesystem session token, but does NOT give the
+  // descriptor body. Constructed here from general UXP knowledge; see FRICTION.
+  let placed = null;
+  await tryStep("place water.jpg", async () => {
+    const entry = await fs.getEntryWithUrl(
+      "file:/Users/sara/Projects/adobe_skills/.test/assets/water.jpg"
+    );
+    const token = await fs.createSessionToken(entry);
+    const res = await bp("placeEvent water.jpg", [{
+      _obj: "placeEvent",
+      null: { _path: token, _kind: "local" },
+      // identity transform; we scale/position next
+      freeTransformCenterState: { _enum: "quadCenterState", _value: "QCSAverage" },
+      _options: { dialogOptions: "dontDisplay" },
+    }]);
+    if (res === null) throw new Error("placeEvent failed (see prior error)");
+    placed = doc.activeLayers[0] || null;
+    if (placed) placed.name = "water-bg";
+  });
+
+  // Scale/position the placed smart object to COVER the canvas.
+  // water.jpg is 1000x1000; canvas is 1080x1350 -> must cover the taller side.
+  // Place lands centered at native size; compute scale to cover and recenter.
+  await tryStep("cover-scale background", async () => {
+    if (!placed) throw new Error("no placed layer to scale");
+    const b = placed.bounds;
+    const curW = b.right - b.left;
+    const curH = b.bottom - b.top;
+    if (curW <= 0 || curH <= 0) throw new Error("placed layer has no bounds");
+    // scale so the image covers BOTH dimensions (max ratio), in percent
+    const scale = Math.max(W / curW, H / curH) * 100;
+    doc.activeLayers = [placed];
+    const scaleRes = await bp("transform scale background", [{
+      _obj: "transform",
+      _target: [{ _ref: "layer", _enum: "ordinal", _value: "targetEnum" }],
+      freeTransformCenterState: { _enum: "quadCenterState", _value: "QCSAverage" },
+      width:  { _unit: "percentUnit", _value: scale },
+      height: { _unit: "percentUnit", _value: scale },
+      interfaceIconFrameDimmed: { _enum: "interpolationType", _value: "bicubic" },
+      _options: { dialogOptions: "dontDisplay" },
+    }]);
+    if (scaleRes === null) throw new Error("scale failed");
+    // recenter over the canvas using translate (delta px)
+    const nb = placed.bounds;
+    const cx = (nb.left + nb.right) / 2;
+    const cy = (nb.top + nb.bottom) / 2;
+    placed.translate(W / 2 - cx, H / 2 - cy);
+  });
+
+  // ---- 3. SCRIM: dark vertical gradient for legibility -----------------
+  // Gradient fill layer (foreground=ink at bottom -> transparent at top).
+  // Full canvas, no selection -> covers everything; opacity tames it.
+  await tryStep("gradient scrim", async () => {
+    const res = await bp("make gradient scrim", [{
+      _obj: "make",
+      _target: [{ _ref: "contentLayer" }],
+      using: {
+        _obj: "contentLayer",
+        type: {
+          _obj: "gradientLayer",
+          angle: { _unit: "angleUnit", _value: 90 },      // vertical
+          type: { _enum: "gradientType", _value: "linear" },
+          gradient: {
+            _obj: "gradientClassEvent",
+            name: "scrim",
+            gradientForm: { _enum: "gradientForm", _value: "customStops" },
+            interfaceIconFrameDimmed: 4096,
+            colors: [
+              { _obj: "colorStop",
+                color: { _obj: "RGBColor", red: C.ink.red, grain: C.ink.grain, blue: C.ink.blue },
+                type: { _enum: "colorStopType", _value: "userStop" },
+                location: 0, midpoint: 50 },
+              { _obj: "colorStop",
+                color: { _obj: "RGBColor", red: C.ink.red, grain: C.ink.grain, blue: C.ink.blue },
+                type: { _enum: "colorStopType", _value: "userStop" },
+                location: 4096, midpoint: 50 },
+            ],
+            transparency: [
+              { _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 90 },
+                location: 0, midpoint: 50 },        // dark at BOTTOM (angle 90 -> start=bottom)
+              { _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 0 },
+                location: 4096, midpoint: 50 },     // clear at TOP
+            ],
+          },
+        },
+      },
+      _options: { dialogOptions: "dontDisplay" },
+    }]);
+    if (res === null) throw new Error("gradient scrim failed");
+    const g = doc.activeLayers[0];
+    if (g) g.name = "scrim";
+  });
+
+  // ---- 4. ACCENT BAND: teal block at the bottom ------------------------
+  // Select a rectangle, then make a solid-color fill layer -> auto-masked.
+  await tryStep("bottom accent band", async () => {
+    const sel = await bp("select band rectangle", [{
+      _obj: "set",
+      _target: [{ _ref: "channel", _property: "selection" }],
+      to: { _obj: "rectangle",
+        top:    { _unit: "pixelsUnit", _value: 1180 },
+        left:   { _unit: "pixelsUnit", _value: 0 },
+        bottom: { _unit: "pixelsUnit", _value: H },
+        right:  { _unit: "pixelsUnit", _value: W },
+      },
+    }]);
+    if (sel === null) throw new Error("band selection failed");
+    const fill = await bp("make band fill layer", [{
+      _obj: "make",
+      _target: [{ _ref: "contentLayer" }],
+      using: { _obj: "contentLayer", type: {
+        _obj: "solidColorLayer",
+        color: { _obj: "RGBColor", red: C.deepTeal.red, grain: C.deepTeal.grain, blue: C.deepTeal.blue },
+      } },
+      _options: { dialogOptions: "dontDisplay" },
+    }]);
+    if (fill === null) throw new Error("band fill failed");
+    const band = doc.activeLayers[0];
+    if (band) { band.name = "accent-band"; band.opacity = 92; }
+    await bp("deselect band", [{
+      _obj: "set",
+      _target: [{ _ref: "channel", _property: "selection" }],
+      to: { _enum: "ordinal", _value: "none" },
+    }]);
+  });
+
+  // ---- 5. ACCENT RULE: thin bright-cyan bar above the headline ---------
+  await tryStep("accent rule", async () => {
+    const sel = await bp("select rule rectangle", [{
+      _obj: "set",
+      _target: [{ _ref: "channel", _property: "selection" }],
+      to: { _obj: "rectangle",
+        top:    { _unit: "pixelsUnit", _value: 470 },
+        left:   { _unit: "pixelsUnit", _value: 96 },
+        bottom: { _unit: "pixelsUnit", _value: 482 },
+        right:  { _unit: "pixelsUnit", _value: 256 },
+      },
+    }]);
+    if (sel === null) throw new Error("rule selection failed");
+    const fill = await bp("make rule fill layer", [{
+      _obj: "make",
+      _target: [{ _ref: "contentLayer" }],
+      using: { _obj: "contentLayer", type: {
+        _obj: "solidColorLayer",
+        color: { _obj: "RGBColor", red: C.brightCyan.red, grain: C.brightCyan.grain, blue: C.brightCyan.blue },
+      } },
+      _options: { dialogOptions: "dontDisplay" },
+    }]);
+    if (fill === null) throw new Error("rule fill failed");
+    const rule = doc.activeLayers[0];
+    if (rule) rule.name = "accent-rule";
+    await bp("deselect rule", [{
+      _obj: "set",
+      _target: [{ _ref: "channel", _property: "selection" }],
+      to: { _enum: "ordinal", _value: "none" },
+    }]);
+  });
+
+  // ---- 6. TEXT ---------------------------------------------------------
+  /** Create a text layer and force its color explicitly (DOM defaults to black).
+   * @param {string} name layer name
+   * @param {string} contents copy
+   * @param {number} size font size px
+   * @param {{x:number,y:number}} position baseline-ish anchor
+   * @param {{red:number,grain:number,blue:number}} rgb color
+   * @returns {Promise<object|null>} the text layer
+   */
+  async function makeText(name, contents, size, position, rgb) {
+    return await tryStep(`text: ${name}`, async () => {
+      const layer = await doc.createTextLayer({ contents, fontSize: size, position });
+      layer.name = name;
+      // Set color via the DOM first.
+      await tryStep(`text color DOM: ${name}`, async () => {
+        // DOM SolidColor: mutate the existing color object's rgb channels.
+        const c = layer.textItem.characterStyle.color;
+        if (c && typeof c.rgb === "object") {
+          c.rgb.red = rgb.red; c.rgb.green = rgb.grain; c.rgb.blue = rgb.blue;
+          layer.textItem.characterStyle.color = c;
+        } else {
+          throw new Error("DOM color object not in expected shape");
+        }
+      });
+      // Belt-and-suspenders: force color via batchPlay textStyle on this layer.
+      doc.activeLayers = [layer];
+      await bp(`text color bP: ${name}`, [{
+        _obj: "set",
+        _target: [{ _ref: "textLayer", _enum: "ordinal", _value: "targetEnum" }],
+        to: { _obj: "textLayer", textStyleRange: [{
+          _obj: "textStyleRange",
+          from: 0,
+          to: contents.length,
+          textStyle: { _obj: "textStyle",
+            color: { _obj: "RGBColor", red: rgb.red, grain: rgb.grain, blue: rgb.blue },
+          },
+        }] },
+        _options: { dialogOptions: "dontDisplay" },
+      }]);
+      return layer;
+    });
+  }
+
+  // Small eyebrow / tag
+  await makeText("tag", "STAY HYDRATED", 30, { x: 96, y: 440 }, C.brightCyan);
+  // Headline (two visual lines via newline)
+  await makeText("headline", "DRINK\nMORE WATER", 120, { x: 92, y: 600 }, C.white);
+  // Subhead
+  await makeText(
+    "subhead",
+    "Your body is 60% water.\nRefill it. Often.",
+    44,
+    { x: 96, y: 880 },
+    { red: 206, grain: 234, blue: 245 }  // soft light blue
+  );
+  // Footer line inside the teal band
+  await makeText("footer", "8 glasses a day  •  #StayHydrated", 34, { x: 96, y: 1275 }, C.brightCyan);
+
+} finally {
+  await executionContext.hostControl.resumeHistory(doc.id);
+}
+
+// ---- 7. EMIT RESULTS: preview.jpg + state.json --------------------------
+const out = await fs.getTemporaryFolder();
+
+await tryStep("export preview.jpg", async () => {
+  const previewFile = await out.createFile("preview.jpg", { overwrite: true });
+  await doc.saveAs.jpg(previewFile, { quality: 10 }, /* asCopy */ true);
+});
+
+/** Snapshot a layer (and children) into plain JSON for agent review.
+ * @param {object} layer DOM layer
+ * @returns {object}
+ */
+function snapshotLayer(layer) {
+  const node = {
+    id: layer.id,
+    name: layer.name,
+    kind: String(layer.kind),
+    visible: layer.visible,
+    opacity: layer.opacity,
+    blendMode: String(layer.blendMode),
+    bounds: layer.bounds && {
+      left: layer.bounds.left, top: layer.bounds.top,
+      right: layer.bounds.right, bottom: layer.bounds.bottom,
+    },
+  };
+  try {
+    if (layer.kind === constants.LayerKind.TEXT) node.text = layer.textItem.contents;
+  } catch (e) { /* non-text or no access */ }
+  if (layer.layers && layer.layers.length) node.children = layer.layers.map(snapshotLayer);
+  return node;
+}
+
+await tryStep("write state.json", async () => {
+  const state = {
+    document: {
+      id: doc.id, name: doc.title,
+      width: doc.width, height: doc.height, resolution: doc.resolution,
+    },
+    design: {
+      canvas: `${W}x${H}`,
+      palette: { deepTeal: "#062635", brightCyan: "#38D3FF", scrim: "#041622" },
+      background: "water.jpg full-bleed, cover-scaled, centered",
+      headline: "DRINK MORE WATER",
+    },
+    activeLayers: doc.activeLayers.map(l => l.name),
+    layers: doc.layers.map(snapshotLayer),
+    errors,
+  };
+  const stateFile = await out.createFile("state.json", { overwrite: true });
+  await stateFile.write(JSON.stringify(state, null, 2));
+  console.log("STATE:", stateFile.nativePath);
+});
+
+console.log("OUTPUT_DIR:", out.nativePath);
+console.log("ERRORS:", errors.length);

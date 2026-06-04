@@ -1,0 +1,134 @@
+/* drink-water.psjs — iteration 2
+ * Fixes from loop iteration 1 (preview showed white canvas, black text):
+ *  - Empty-pixel-layer + Edit>Fill silently produced nothing → switch to
+ *    SOLID COLOR FILL LAYERS (make contentLayer/solidColorLayer), which paint
+ *    reliably and (with an active selection) auto-mask to a region.
+ *  - Text was default black on (intended) blue → set foreground WHITE before
+ *    creating text layers (new type uses the foreground color).
+ * Same output contract (preview.jpg + state.json to temp).
+ */
+
+const { app, action, constants } = require("photoshop");
+const { localFileSystem: fs } = require("uxp").storage;
+const { executionContext } = require("uxp").script;
+
+const errors = [];
+
+async function play(descriptors, label) {
+  const results = await action.batchPlay(descriptors, { continueOnError: true });
+  for (const r of results) {
+    if (r && r._obj === "error") {
+      throw new Error(`batchPlay "${label}" failed: ${r.message} (result=${r.result})`);
+    }
+  }
+  return results;
+}
+
+/** Set the foreground color (RGB). Note PS quirk: green channel key is "grain". */
+async function setForeground(r, g, b) {
+  await play([{
+    _obj: "set",
+    _target: [{ _ref: "color", _property: "foregroundColor" }],
+    to: { _obj: "RGBColor", red: r, grain: g, blue: b },
+    source: "photoshopPicker",
+    _options: { dialogOptions: "dontDisplay" }
+  }], "set foreground color");
+}
+
+/** Make a Solid Color fill layer of the given RGB. If a selection is active,
+ *  the fill layer is auto-masked to it. Returns the new (active) layer. */
+async function makeSolidColorLayer(doc, r, g, b) {
+  await play([{
+    _obj: "make",
+    _target: [{ _ref: "contentLayer" }],
+    using: {
+      _obj: "contentLayer",
+      type: { _obj: "solidColorLayer", color: { _obj: "RGBColor", red: r, grain: g, blue: b } }
+    },
+    _options: { dialogOptions: "dontDisplay" }
+  }], "make solid color layer");
+  return doc.activeLayers[0];
+}
+
+async function selectRect(W, top, left, bottom, right) {
+  await play([{
+    _obj: "set",
+    _target: [{ _ref: "channel", _property: "selection" }],
+    to: {
+      _obj: "rectangle",
+      top: { _unit: "pixelsUnit", _value: top },
+      left: { _unit: "pixelsUnit", _value: left },
+      bottom: { _unit: "pixelsUnit", _value: bottom },
+      right: { _unit: "pixelsUnit", _value: right },
+    },
+    _options: { dialogOptions: "dontDisplay" }
+  }], "select rectangle");
+}
+
+async function deselect() {
+  await play([{
+    _obj: "set",
+    _target: [{ _ref: "channel", _property: "selection" }],
+    to: { _enum: "ordinal", _value: "none" },
+    _options: { dialogOptions: "dontDisplay" }
+  }], "deselect");
+}
+
+// 1. RESOLVE TARGET — new document
+const W = 1080, H = 1080;
+const doc = await app.createDocument({ width: W, height: H, resolution: 72, name: "drink-water-post", fill: "white" });
+
+await executionContext.hostControl.suspendHistory({ documentID: doc.id, name: "Agent: build drink-water post" });
+
+try {
+  // Background: full-canvas blue solid color fill layer
+  await deselect();
+  const bg = await makeSolidColorLayer(doc, 30, 136, 229);   // #1E88E5
+  bg.name = "background-blue";
+
+  // Accent band: darker blue fill layer masked to a centered rectangle
+  await selectRect(W, 380, 0, 700, W);
+  const band = await makeSolidColorLayer(doc, 13, 71, 161);   // #0D47A1
+  band.name = "headline-band";
+  band.opacity = 40;
+  await deselect();
+
+  // Text: white, so it reads on blue (new type uses foreground color)
+  await setForeground(255, 255, 255);
+
+  const headline = await doc.createTextLayer({ contents: "Drink More Water", fontSize: 96, position: { x: 90, y: 510 }, name: "headline" });
+  const subhead = await doc.createTextLayer({ contents: "Stay hydrated — aim for 8 glasses a day.", fontSize: 38, position: { x: 92, y: 620 }, name: "subhead" });
+} catch (e) {
+  errors.push({ step: "compose", message: String(e) });
+} finally {
+  await executionContext.hostControl.resumeHistory(doc.id);
+}
+
+// 3. EMIT RESULTS
+const out = await fs.getTemporaryFolder();
+let previewPath = null;
+try {
+  const previewFile = await out.createFile("preview.jpg", { overwrite: true });
+  await doc.saveAs.jpg(previewFile, { quality: 10 }, true);
+  previewPath = previewFile.nativePath;
+} catch (e) { errors.push({ step: "export preview", message: String(e) }); }
+
+function snapshotLayer(layer) {
+  const node = {
+    id: layer.id, name: layer.name, kind: String(layer.kind),
+    visible: layer.visible, opacity: layer.opacity, blendMode: String(layer.blendMode),
+    bounds: layer.bounds && { left: layer.bounds.left, top: layer.bounds.top, right: layer.bounds.right, bottom: layer.bounds.bottom },
+  };
+  if (layer.kind === constants.LayerKind.TEXT) { try { node.text = layer.textItem.contents; } catch (e) {} }
+  if (layer.layers && layer.layers.length) node.children = layer.layers.map(snapshotLayer);
+  return node;
+}
+
+const state = {
+  document: { id: doc.id, name: doc.title, width: doc.width, height: doc.height, resolution: doc.resolution },
+  layers: doc.layers.map(snapshotLayer),
+  errors,
+  output: { preview: previewPath },
+};
+const stateFile = await out.createFile("state.json", { overwrite: true });
+await stateFile.write(JSON.stringify(state, null, 2));

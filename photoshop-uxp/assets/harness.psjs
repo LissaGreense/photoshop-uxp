@@ -1,0 +1,74 @@
+/* ============================================================================
+ * Photoshop UXP agent harness — COPY THIS, put your edits in the marked block.
+ *
+ * A .psjs runs ALREADY-MODAL: call DOM/batchPlay directly, NO core.executeAsModal.
+ * Top-level await is allowed. Trigger it (Photoshop must be running):
+ *     open -a "Adobe Photoshop 2025" /abs/path/to/this.psjs   # match the installed version
+ * It writes preview.jpg + state.json to the temp folder. console.log is NOT
+ * visible externally — find the output on disk by mtime instead:
+ *     find /var/folders -path '*Adobe/UXP/PluginsStorage*External*' \
+ *          -name state.json -newer /tmp/marker 2>/dev/null | head -1
+ * Then look at preview.jpg (errors:[] does NOT mean it looks right) and read state.json.
+ * ========================================================================== */
+const { app, action, constants } = require("photoshop");
+const { localFileSystem: fs } = require("uxp").storage;
+const errors = [];
+
+/** Run batchPlay descriptors; record (don't throw on) Photoshop's error shape. */
+async function bp(descriptors, label) {
+  const res = await action.batchPlay(descriptors, { continueOnError: true });
+  for (const r of res) {
+    if (r && r._obj === "error") errors.push({ label, message: r.message, result: r.result });
+  }
+  return res;
+}
+
+/** Recursively snapshot a layer to plain JSON for the readback contract. */
+function snapshotLayer(layer) {
+  const n = {
+    id: layer.id, name: layer.name, kind: String(layer.kind),
+    visible: layer.visible, opacity: layer.opacity, blendMode: String(layer.blendMode),
+    bounds: layer.bounds && {
+      left: layer.bounds.left, top: layer.bounds.top,
+      right: layer.bounds.right, bottom: layer.bounds.bottom,
+    },
+  };
+  if (layer.kind === constants.LayerKind.TEXT) { try { n.text = layer.textItem.contents; } catch (e) {} }
+  if (layer.layers && layer.layers.length) n.children = layer.layers.map(snapshotLayer);
+  return n;
+}
+
+/** Emit preview.jpg + state.json to the temp folder. Call this LAST. */
+async function emit(doc, extra) {
+  const out = await fs.getTemporaryFolder();
+  try {
+    const pf = await out.createFile("preview.jpg", { overwrite: true });
+    await doc.saveAs.jpg(pf, { quality: 9 }, /* asCopy */ true);
+  } catch (e) { errors.push({ label: "emit preview", message: String(e) }); }
+  const state = {
+    document: { id: doc.id, name: doc.title, width: doc.width, height: doc.height, resolution: doc.resolution },
+    layers: doc.layers.map(snapshotLayer),
+    errors,
+    ...(extra || {}),
+  };
+  const sf = await out.createFile("state.json", { overwrite: true });
+  await sf.write(JSON.stringify(state, null, 2));
+}
+
+// ============================ YOUR WORK BELOW ===============================
+// 1) Resolve the target document per user intent (see SKILL.md "Intent routing"):
+//      if (app.documents.length === 0) throw new Error("No document open");
+//      const doc = app.activeDocument;                                  // act on the open doc
+//    OR
+//      const doc = await app.createDocument({ width: 1600, height: 900, resolution: 72, fill: "white" });
+//
+// 2) Build/edit with the DOM + bp([...], "label") for batchPlay gaps.
+//    See references/layers-and-composition.md (fills, images, adjustments, selections, text).
+//
+// 3) Mind general sizing/contrast (SKILL.md), then VERIFY by rendering — never trust errors:[].
+
+// const doc = ...;
+// ... your edits, each batchPlay call wrapped in bp(...) ...
+
+// await emit(doc, { note: "what this run produced" });
+// ===========================================================================

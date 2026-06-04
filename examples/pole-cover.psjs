@@ -1,0 +1,473 @@
+/**
+ * pole-cover.psjs
+ * Builds a polished blog-post COVER about pole dancing (NEW document).
+ *
+ * Design direction: graphic / typographic (no pole-dance photo available).
+ *   - 1600x900 landscape cover
+ *   - Deep diagonal gradient (near-black -> deep magenta/plum) = energy + elegance
+ *   - A stylized vertical "pole" accent bar on the right third (the subject, abstracted)
+ *   - A soft radial glow behind the pole for a focal point / spotlight feel
+ *   - Gold/amber kicker rule + eyebrow, white dominant headline, soft subtitle
+ *   - Drop shadow on the headline so it stays crisp over the gradient
+ *
+ * Conventions (per photoshop-uxp SKILL.md):
+ *   - .psjs is ALREADY MODAL. No core.executeAsModal wrappers.
+ *   - DOM-first, batchPlay for the gaps (fill/gradient layers, layer styles, text styling).
+ *   - One text layer PER LINE (no \n -> tofu).
+ *   - Non-fatal failures collected into errors[]; never abort the whole run.
+ *   - Emits preview.jpg + state.json to the temp folder.
+ */
+
+const { app, action, constants } = require("photoshop");
+const { localFileSystem: fs } = require("uxp").storage;
+const { executionContext } = require("uxp").script;
+
+const errors = [];
+
+/** Run a batchPlay step, check for the error shape, record non-fatal failures.
+ * @param {string} step label
+ * @param {object[]} descriptors actionJSON command array
+ * @param {object} [options]
+ * @returns {Promise<any[]|null>} results, or null on failure
+ */
+async function bp(step, descriptors, options = {}) {
+  try {
+    const results = await action.batchPlay(descriptors, { continueOnError: true, ...options });
+    for (const r of results || []) {
+      if (r && r._obj === "error") {
+        errors.push({ step, message: r.message || "unknown batchPlay error", result: r.result });
+        return null;
+      }
+    }
+    return results;
+  } catch (e) {
+    errors.push({ step, message: String(e && e.message ? e.message : e) });
+    return null;
+  }
+}
+
+/** Wrap a risky DOM step so it records but doesn't abort the run.
+ * @param {string} step
+ * @param {() => Promise<any>} fn
+ * @returns {Promise<any|null>}
+ */
+async function tryStep(step, fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    errors.push({ step, message: String(e && e.message ? e.message : e) });
+    return null;
+  }
+}
+
+// ---- Palette (actionJSON RGBColor keys: red / grain(=green) / blue) ------
+const C = {
+  ink:      { red: 12,  grain: 7,   blue: 18  },  // #0C0712 near-black base
+  plum:     { red: 92,  grain: 18,  blue: 78  },  // #5C124E deep magenta/plum
+  magenta:  { red: 196, grain: 30,  blue: 120 }, // #C41E78 vivid accent
+  gold:     { red: 240, grain: 188, blue: 92  }, // #F0BC5C warm gold accent
+  white:    { red: 255, grain: 255, blue: 255 },
+  softpink: { red: 232, grain: 198, blue: 222 }, // #E8C6DE muted subtitle
+  poleSteel:{ red: 224, grain: 222, blue: 230 }, // chrome pole
+};
+
+const W = 1600;
+const H = 900;
+const MARGIN = 110; // ~7% of short edge
+
+// ---- 1. RESOLVE TARGET: new blank doc -----------------------------------
+const doc = await app.createDocument({
+  width: W,
+  height: H,
+  resolution: 72,
+  name: "pole-cover",
+  fill: "black",
+});
+
+await executionContext.hostControl.suspendHistory({
+  documentID: doc.id,
+  name: "Agent: build pole-dancing cover",
+});
+
+/** Make a rectangular selection. @returns {Promise<any[]|null>} */
+function selectRect(top, left, bottom, right) {
+  return bp("select rect", [{
+    _obj: "set",
+    _target: [{ _ref: "channel", _property: "selection" }],
+    to: { _obj: "rectangle",
+      top:    { _unit: "pixelsUnit", _value: top },
+      left:   { _unit: "pixelsUnit", _value: left },
+      bottom: { _unit: "pixelsUnit", _value: bottom },
+      right:  { _unit: "pixelsUnit", _value: right },
+    },
+  }]);
+}
+
+/** Deselect. */
+function deselect() {
+  return bp("deselect", [{
+    _obj: "set",
+    _target: [{ _ref: "channel", _property: "selection" }],
+    to: { _enum: "ordinal", _value: "none" },
+  }]);
+}
+
+/** Make a solid-color fill layer (auto-masked to current selection if any).
+ * @returns {Promise<object|null>} the new fill layer
+ */
+async function solidFill(name, rgb, opacity = 100) {
+  const res = await bp(`fill ${name}`, [{
+    _obj: "make",
+    _target: [{ _ref: "contentLayer" }],
+    using: { _obj: "contentLayer", type: {
+      _obj: "solidColorLayer",
+      color: { _obj: "RGBColor", red: rgb.red, grain: rgb.grain, blue: rgb.blue },
+    } },
+    _options: { dialogOptions: "dontDisplay" },
+  }]);
+  if (res === null) return null;
+  const layer = doc.activeLayers[0];
+  if (layer) { layer.name = name; layer.opacity = opacity; }
+  return layer;
+}
+
+try {
+  // ---- 2. BACKGROUND GRADIENT: diagonal ink -> plum ---------------------
+  await tryStep("bg gradient", async () => {
+    const res = await bp("make bg gradient", [{
+      _obj: "make",
+      _target: [{ _ref: "contentLayer" }],
+      using: {
+        _obj: "contentLayer",
+        type: {
+          _obj: "gradientLayer",
+          angle: { _unit: "angleUnit", _value: -118 }, // top-right light -> bottom-left dark
+          type: { _enum: "gradientType", _value: "linear" },
+          gradient: {
+            _obj: "gradientClassEvent",
+            name: "bg",
+            gradientForm: { _enum: "gradientForm", _value: "customStops" },
+            interfaceIconFrameDimmed: 4096,
+            colors: [
+              { _obj: "colorStop",
+                color: { _obj: "RGBColor", red: C.ink.red, grain: C.ink.grain, blue: C.ink.blue },
+                type: { _enum: "colorStopType", _value: "userStop" },
+                location: 0, midpoint: 50 },
+              { _obj: "colorStop",
+                color: { _obj: "RGBColor", red: C.ink.red, grain: C.ink.grain, blue: C.ink.blue },
+                type: { _enum: "colorStopType", _value: "userStop" },
+                location: 1900, midpoint: 50 },
+              { _obj: "colorStop",
+                color: { _obj: "RGBColor", red: C.plum.red, grain: C.plum.grain, blue: C.plum.blue },
+                type: { _enum: "colorStopType", _value: "userStop" },
+                location: 4096, midpoint: 50 },
+            ],
+            transparency: [
+              { _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 100 }, location: 0, midpoint: 50 },
+              { _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 100 }, location: 4096, midpoint: 50 },
+            ],
+          },
+        },
+      },
+      _options: { dialogOptions: "dontDisplay" },
+    }]);
+    if (res === null) throw new Error("bg gradient failed");
+    const g = doc.activeLayers[0];
+    if (g) g.name = "bg-gradient";
+  });
+
+  // ---- 3. SPOTLIGHT GLOW: radial magenta glow behind the pole/right --
+  // A radial gradient fill layer, magenta center fading to transparent, set to
+  // Screen so it reads as a light bloom (the "spotlight" on the performer).
+  await tryStep("spotlight glow", async () => {
+    const res = await bp("make spotlight", [{
+      _obj: "make",
+      _target: [{ _ref: "contentLayer" }],
+      using: {
+        _obj: "contentLayer",
+        type: {
+          _obj: "gradientLayer",
+          align: false,
+          // shift the radial center toward the right third
+          offset: { _obj: "paint", horizontal: { _unit: "percentUnit", _value: 34 },
+                    vertical: { _unit: "percentUnit", _value: -8 } },
+          type: { _enum: "gradientType", _value: "radial" },
+          gradient: {
+            _obj: "gradientClassEvent",
+            name: "glow",
+            gradientForm: { _enum: "gradientForm", _value: "customStops" },
+            interfaceIconFrameDimmed: 4096,
+            colors: [
+              { _obj: "colorStop",
+                color: { _obj: "RGBColor", red: C.magenta.red, grain: C.magenta.grain, blue: C.magenta.blue },
+                type: { _enum: "colorStopType", _value: "userStop" },
+                location: 0, midpoint: 50 },
+              { _obj: "colorStop",
+                color: { _obj: "RGBColor", red: C.magenta.red, grain: C.magenta.grain, blue: C.magenta.blue },
+                type: { _enum: "colorStopType", _value: "userStop" },
+                location: 4096, midpoint: 50 },
+            ],
+            transparency: [
+              { _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 100 }, location: 0, midpoint: 50 },
+              { _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 0 }, location: 2600, midpoint: 50 },
+            ],
+          },
+        },
+      },
+      _options: { dialogOptions: "dontDisplay" },
+    }]);
+    if (res === null) throw new Error("spotlight failed");
+    const g = doc.activeLayers[0];
+    if (g) { g.name = "spotlight"; g.blendMode = constants.BlendMode.SCREEN; g.opacity = 70; }
+  });
+
+  // ---- 4. THE POLE: a vertical chrome bar in the right third -----------
+  // Built from a thin steel rectangle + a brighter highlight stripe for a
+  // cylindrical/chrome read.
+  const poleX = 1190;
+  const poleW = 26;
+  await tryStep("pole bar", async () => {
+    await selectRect(0, poleX, H, poleX + poleW);
+    const pole = await solidFill("pole", C.poleSteel, 100);
+    if (!pole) throw new Error("pole fill failed");
+    await deselect();
+    // bright highlight stripe down the left edge of the pole
+    await selectRect(0, poleX + 5, H, poleX + 11);
+    const hi = await solidFill("pole-highlight", C.white, 85);
+    await deselect();
+    // soft shadow stripe down the right edge
+    await selectRect(0, poleX + poleW - 7, H, poleX + poleW);
+    const sh = await solidFill("pole-shadow", { red: 120, grain: 118, blue: 130 }, 70);
+    await deselect();
+  });
+
+  // ---- 5. BOTTOM SCRIM: subtle dark band under the headline ------------
+  // Diagonal gradient already keeps the left dark, but add a low gradient scrim
+  // to guarantee the subtitle/footer contrast.
+  await tryStep("text scrim", async () => {
+    const res = await bp("make text scrim", [{
+      _obj: "make",
+      _target: [{ _ref: "contentLayer" }],
+      using: {
+        _obj: "contentLayer",
+        type: {
+          _obj: "gradientLayer",
+          angle: { _unit: "angleUnit", _value: 90 },
+          type: { _enum: "gradientType", _value: "linear" },
+          gradient: {
+            _obj: "gradientClassEvent",
+            name: "scrim",
+            gradientForm: { _enum: "gradientForm", _value: "customStops" },
+            interfaceIconFrameDimmed: 4096,
+            colors: [
+              { _obj: "colorStop",
+                color: { _obj: "RGBColor", red: C.ink.red, grain: C.ink.grain, blue: C.ink.blue },
+                type: { _enum: "colorStopType", _value: "userStop" },
+                location: 0, midpoint: 50 },
+              { _obj: "colorStop",
+                color: { _obj: "RGBColor", red: C.ink.red, grain: C.ink.grain, blue: C.ink.blue },
+                type: { _enum: "colorStopType", _value: "userStop" },
+                location: 4096, midpoint: 50 },
+            ],
+            transparency: [
+              { _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 78 }, location: 0, midpoint: 50 },     // dark bottom
+              { _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 0 }, location: 2200, midpoint: 50 },   // clear mid
+            ],
+          },
+        },
+      },
+      _options: { dialogOptions: "dontDisplay" },
+    }]);
+    if (res === null) throw new Error("text scrim failed");
+    const g = doc.activeLayers[0];
+    if (g) g.name = "text-scrim";
+  });
+
+  // ---- 6. KICKER RULE: short gold bar above the eyebrow ----------------
+  await tryStep("kicker rule", async () => {
+    await selectRect(232, MARGIN, 240, MARGIN + 84);
+    const rule = await solidFill("kicker-rule", C.gold, 100);
+    if (!rule) throw new Error("kicker rule failed");
+    await deselect();
+  });
+
+  // ---- 7. TEXT: hierarchy via one layer per line -----------------------
+  /** Create a text layer, set font + tracking, force color (DOM + batchPlay).
+   * @param {string} name
+   * @param {string} contents
+   * @param {number} size px
+   * @param {{x:number,y:number}} position
+   * @param {{red:number,grain:number,blue:number}} rgb
+   * @param {{font?:string, tracking?:number}} [opts]
+   * @returns {Promise<object|null>}
+   */
+  async function makeText(name, contents, size, position, rgb, opts = {}) {
+    return await tryStep(`text: ${name}`, async () => {
+      const layer = await doc.createTextLayer({ contents, fontSize: size, position });
+      layer.name = name;
+      doc.activeLayers = [layer];
+      // Set font, tracking, and color via batchPlay textStyleRange (reliable).
+      const textStyle = {
+        _obj: "textStyle",
+        color: { _obj: "RGBColor", red: rgb.red, grain: rgb.grain, blue: rgb.blue },
+        size: { _unit: "pointsUnit", _value: size },
+      };
+      if (opts.font) textStyle.fontPostScriptName = opts.font;
+      if (typeof opts.tracking === "number") textStyle.tracking = opts.tracking;
+      await bp(`text style: ${name}`, [{
+        _obj: "set",
+        _target: [{ _ref: "textLayer", _enum: "ordinal", _value: "targetEnum" }],
+        to: { _obj: "textLayer", textStyleRange: [{
+          _obj: "textStyleRange",
+          from: 0,
+          to: contents.length,
+          textStyle,
+        }] },
+        _options: { dialogOptions: "dontDisplay" },
+      }]);
+      return layer;
+    });
+  }
+
+  // Eyebrow / kicker
+  await makeText("eyebrow", "THE POLE COLLECTIVE  /  ISSUE 07", 26,
+    { x: MARGIN, y: 300 }, C.gold, { font: "HelveticaNeue-Bold", tracking: 260 });
+
+  // Headline — two stacked lines, dominant (~13% of H = ~118px)
+  await makeText("headline-1", "STRENGTH", 150,
+    { x: MARGIN - 4, y: 470 }, C.white, { font: "HelveticaNeue-Bold", tracking: 20 });
+  await makeText("headline-2", "IN MOTION", 150,
+    { x: MARGIN - 4, y: 620 }, C.white, { font: "HelveticaNeue-Bold", tracking: 20 });
+
+  // Subtitle — soft pink, smaller
+  await makeText("subtitle",
+    "The art, athleticism and unstoppable grace of pole.", 38,
+    { x: MARGIN, y: 720 }, C.softpink, { font: "HelveticaNeue", tracking: 10 });
+
+  // Footer (no unicode arrow -> renders tofu; draw the arrow from shapes below)
+  await makeText("footer", "READ THE FEATURE", 26,
+    { x: MARGIN, y: 822 }, C.gold, { font: "HelveticaNeue-Bold", tracking: 220 });
+
+  // ---- 7b. FOOTER ARROW: drawn from fill shapes (shaft + rotated head) --
+  // Placed just to the right of the footer text. Shaft = horizontal bar; head
+  // = two short bars rotated +/-45deg to form a clean chevron.
+  await tryStep("footer arrow", async () => {
+    const ax = 560;          // arrow start x (right of "READ THE FEATURE")
+    const ay = 814;          // vertical center of the arrow
+    const tipX = ax + 50;    // x of the arrow tip
+    const headDepth = 16;    // how far the head extends back from the tip
+    const headHalf = 11;     // half-height of the head base
+    // shaft
+    await selectRect(ay - 2, ax, ay + 2, tipX - headDepth + 4);
+    await solidFill("arrow-shaft", C.gold, 100);
+    await deselect();
+
+    // arrowhead: union of thin horizontal rows whose width tapers to the tip,
+    // forming a crisp right-pointing triangle (deterministic, no rotation).
+    const ROWS = headHalf;            // one 1px row per half-height
+    const rects = [];
+    for (let i = 0; i < ROWS; i++) {
+      // top row i and its mirror below center; width shrinks toward the tip
+      const frac = i / ROWS;          // 0 at center, ->1 at the point
+      const backX = tipX - headDepth * (1 - frac); // left edge of this row
+      rects.push({ top: ay - headHalf + i, left: backX, bottom: ay - headHalf + i + 1, right: tipX });
+      rects.push({ top: ay + headHalf - i - 1, left: backX, bottom: ay + headHalf - i, right: tipX });
+    }
+    // build one combined selection: SET the first rect, then ADD the rest.
+    // (A plain `set` on the selection channel REPLACES; use the `addTo`
+    //  command to union — `selectionModifier` inside `set` is silently ignored.)
+    for (let i = 0; i < rects.length; i++) {
+      const r = rects[i];
+      const rectObj = { _obj: "rectangle",
+        top: { _unit: "pixelsUnit", _value: r.top },
+        left: { _unit: "pixelsUnit", _value: r.left },
+        bottom: { _unit: "pixelsUnit", _value: r.bottom },
+        right: { _unit: "pixelsUnit", _value: r.right } };
+      await bp(`arrowhead row ${i}`, [{
+        _obj: i === 0 ? "set" : "addTo",
+        _target: [{ _ref: "channel", _property: "selection" }],
+        to: rectObj,
+      }]);
+    }
+    await solidFill("arrow-head", C.gold, 100);
+    await deselect();
+  });
+
+  // ---- 8. HEADLINE DROP SHADOW (legibility over gradient) --------------
+  await tryStep("headline shadow", async () => {
+    for (const nm of ["headline-1", "headline-2"]) {
+      const layer = doc.layers.find(l => l.name === nm);
+      if (!layer) continue;
+      doc.activeLayers = [layer];
+      await bp(`drop shadow ${nm}`, [{
+        _obj: "set",
+        _target: [{ _ref: "property", _property: "layerEffects" },
+                  { _ref: "layer", _enum: "ordinal", _value: "targetEnum" }],
+        to: { _obj: "layerEffects",
+          dropShadow: { _obj: "dropShadow",
+            enabled: true, present: true, showInDialog: true,
+            mode: { _enum: "blendMode", _value: "multiply" },
+            color: { _obj: "RGBColor", red: 0, grain: 0, blue: 0 },
+            opacity: { _unit: "percentUnit", _value: 55 },
+            useGlobalAngle: false,
+            localLightingAngle: { _unit: "angleUnit", _value: 120 },
+            distance: { _unit: "pixelsUnit", _value: 6 },
+            chokeMatte: { _unit: "percentUnit", _value: 0 },
+            blur: { _unit: "pixelsUnit", _value: 22 },
+          },
+        },
+        _options: { dialogOptions: "dontDisplay" },
+      }]);
+    }
+  });
+
+} finally {
+  await executionContext.hostControl.resumeHistory(doc.id);
+}
+
+// ---- 9. EMIT RESULTS ----------------------------------------------------
+const out = await fs.getTemporaryFolder();
+
+await tryStep("export preview.jpg", async () => {
+  const previewFile = await out.createFile("preview.jpg", { overwrite: true });
+  await doc.saveAs.jpg(previewFile, { quality: 10 }, /* asCopy */ true);
+});
+
+/** Snapshot a layer (and children) into plain JSON.
+ * @param {object} layer
+ * @returns {object}
+ */
+function snapshotLayer(layer) {
+  const node = {
+    id: layer.id, name: layer.name, kind: String(layer.kind),
+    visible: layer.visible, opacity: layer.opacity, blendMode: String(layer.blendMode),
+    bounds: layer.bounds && {
+      left: layer.bounds.left, top: layer.bounds.top,
+      right: layer.bounds.right, bottom: layer.bounds.bottom,
+    },
+  };
+  try { if (layer.kind === constants.LayerKind.TEXT) node.text = layer.textItem.contents; }
+  catch (e) { /* */ }
+  if (layer.layers && layer.layers.length) node.children = layer.layers.map(snapshotLayer);
+  return node;
+}
+
+await tryStep("write state.json", async () => {
+  const state = {
+    document: { id: doc.id, name: doc.title, width: doc.width, height: doc.height, resolution: doc.resolution },
+    design: {
+      canvas: `${W}x${H}`,
+      palette: { ink: "#0C0712", plum: "#5C124E", magenta: "#C41E78", gold: "#F0BC5C" },
+      headline: "STRENGTH IN MOTION",
+    },
+    activeLayers: doc.activeLayers.map(l => l.name),
+    layers: doc.layers.map(snapshotLayer),
+    errors,
+  };
+  const stateFile = await out.createFile("state.json", { overwrite: true });
+  await stateFile.write(JSON.stringify(state, null, 2));
+  console.log("STATE:", stateFile.nativePath);
+});
+
+console.log("OUTPUT_DIR:", out.nativePath);
+console.log("ERRORS:", errors.length);

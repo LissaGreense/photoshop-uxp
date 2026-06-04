@@ -1,0 +1,30 @@
+{
+  "skill_name": "photoshop-uxp",
+  "note": "Each eval is run by authoring a .psjs, triggering it with `open -a \"Adobe Photoshop 2025\" <file>`, then reading back preview.jpg + state.json. Success is judged on the RENDERED preview, not errors:[].",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Create a post image that recommends drinking water.",
+      "expected_output": "A new document with a non-white designed background (fill layer), a dominant legible headline and a subhead with deliberate (non-default-black-on-dark) color, all inside safe margins. No tofu glyphs. Renders as an intentional post, not text on white.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Make a polished, attractive social post that recommends drinking water. Make it look designed, not just text on a flat color. Add imagery.",
+      "expected_output": "External image placed and scaled to cover, a scrim/overlay for contrast, clear typographic hierarchy with explicit text color, accent shapes. Image actually covers (no native-size island). Looks publishable.",
+      "files": ["assets/water.jpg", "assets/texture.jpg"]
+    },
+    {
+      "id": 3,
+      "prompt": "I have a photo open. Turn it into a moody, cinematic black-and-white with rich contrast, slightly crushed blacks, and a soft vignette. Don't destroy the original.",
+      "expected_output": "Operates on app.activeDocument (guards for none open). Non-destructive ADJUSTMENT layers (blackAndWhite + curves) over the original. Vignette via a darkening adjustment masked with a radial gradient (select the mask CHANNEL, not set-as-selection). Verifiably B&W with darker edges.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Make a blog post cover about pole dancing, publishable quality.",
+      "expected_output": "1600x900 cover, dominant headline, clear hierarchy (eyebrow/headline/subtitle/CTA), gradient + accent graphics + contrast scrim, balanced composition with a focal point. No tofu (decorative glyphs drawn as shapes). Genuinely publishable to a human eye.",
+      "files": []
+    }
+  ]
+}
