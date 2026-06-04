@@ -104,4 +104,5 @@ await addText(doc, "FIELD NOTES · 02", "kicker", { x: M, y: SPLIT + 75, size: 2
 await addText(doc, "STILL WATERS", "title", { x: M, y: SPLIT + 215, size: 120, tracking: 20, font: "Futura-CondensedExtraBold", color: CREAM });
 
 await emit(doc, { note: "02 — bold geometric photo cover" });
+await doc.closeWithoutSaving();   // we created this doc → close it so runs don't pile up tabs
 // ===========================================================================

@@ -118,4 +118,5 @@ await addText(doc, "A Study in Grey", "title", { x: 80, y: H - 110, size: 78, tr
 await addText(doc, "N° 03   ·   f8   ·   1/250s   ·   ISO 100", "meta", { x: 84, y: H - 56, size: 22, tracking: 80, font: "Menlo-Regular", color: [196, 196, 192] });
 
 await emit(doc, { note: "03 — non-destructive B&W grade, technical caption" });
+await doc.closeWithoutSaving();   // we created this doc → close it so runs don't pile up tabs
 // ===========================================================================

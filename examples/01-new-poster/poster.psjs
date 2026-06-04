@@ -97,4 +97,5 @@ await addText(doc, "More Water", "h2", { x: M, y: 1050, size: 184, tracking: -10
 await addText(doc, "Aim for eight glasses a day.", "caption", { x: M, y: 1245, size: 40, font: "Baskerville-Italic", color: INK });
 
 await emit(doc, { note: "01 — editorial type poster" });
+await doc.closeWithoutSaving();   // we created this doc → close it so runs don't pile up tabs
 // ===========================================================================

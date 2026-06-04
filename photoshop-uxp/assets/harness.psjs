@@ -67,9 +67,13 @@ async function emit(doc, extra) {
 //    See references/layers-and-composition.md (fills, images, adjustments, selections, text).
 //
 // 3) Mind general sizing/contrast (SKILL.md), then VERIFY by rendering — never trust errors:[].
+//
+// 4) Clean up so you don't pile up tabs: if you CREATED this doc, close it after
+//    emitting. NEVER close a document the user already had open — that's their work.
 
 // const doc = ...;
 // ... your edits, each batchPlay call wrapped in bp(...) ...
 
 // await emit(doc, { note: "what this run produced" });
+// await doc.closeWithoutSaving();   // ONLY if you created it (skip when editing the user's open doc)
 // ===========================================================================

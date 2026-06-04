@@ -15,6 +15,8 @@ try { /* edits */ } finally { await executionContext.hostControl.resumeHistory(i
 
 **Async.** Almost every call is async — `await` it, or it races / appears to do nothing. One script at a time; a script can't launch another.
 
+**Don't pile up tabs.** Every `createDocument`/`open` leaves a document open; unattended runs accumulate dozens. After emitting, **close what you created** — `await doc.closeWithoutSaving()`. But a doc the user already had open is *their* work — never close it (resolve intent first; see SKILL.md routing). Batch: open → edit → export → `closeWithoutSaving` each.
+
 **Units & coordinates.** DOM geometry is pixels at the doc's resolution; `bounds` = `{left,top,right,bottom}`, origin top-left. Many batchPlay descriptors need a unit object — `{ _unit: "pixelsUnit", _value: 100 }` (also `percentUnit`, `angleUnit`, `densityUnit`); a raw number where a unit object is expected silently fails. Read `resolution` before computing positions (100px @ 300dpi ≠ @ 72dpi).
 
 **Filesystem.** `fs.getTemporaryFolder()` and the plugin folder are prompt-free; **arbitrary paths prompt a picker** (use a plugin + `fs.createPersistentToken` for fixed locations). File-referencing descriptors (place, save-with-path) need a **session token**: `fs.createSessionToken(entry)`.
