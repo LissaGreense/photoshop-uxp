@@ -23,9 +23,20 @@ Move/order: `layer.translate(dx, dy)`, `await layer.duplicate()`, `layer.delete(
 Entry = `layer.textItem`: `.contents`, `.characterStyle.size`. Three traps:
 - **Multiline:** `\n`/`\r` do NOT break lines (tofu box, stays one line) → **one text layer per line**.
 - **Tofu is general:** any glyph the font lacks (→ — • emoji, fancy quotes) renders as a box. Use ASCII, confirm the font has it, or **draw the decoration as a shape** (see Selections).
-- **Color is NOT inherited from foreground** — `createTextLayer` defaults to **black**. Set `textItem.characterStyle.color` (a SolidColor); if it doesn't take, `set` the text layer's `textStyle.color` via batchPlay. Black-on-dark is the #1 "where's my text" bug — set it deliberately, verify in preview.
+- **Nothing is inherited** — `createTextLayer` defaults to **black**, the default UI font, ~12pt. Set font + size + tracking + color **explicitly** in one `textStyleRange`. Black-on-dark (and tiny-default-size) is the #1 "where's my text" bug.
 
-Font *family*/weight is partial in the DOM — capture a `set` descriptor via Alchemist for exact fonts.
+Set everything at once — and beware a partial `textStyleRange` **replaces** the range, so omitting `size` snaps it back to ~12pt:
+```js
+await doc.createTextLayer({ contents: txt, position: { x, y }, name });
+await bp([{ _obj: "set", _target: [{ _ref: "textLayer", _enum: "ordinal", _value: "targetEnum" }],
+  to: { _obj: "textLayer", textStyleRange: [{ _obj: "textStyleRange", from: 0, to: txt.length,
+    textStyle: { _obj: "textStyle",
+      fontPostScriptName: "Didot", fontName: "Didot",          // a REAL face — the default looks dated
+      size: { _unit: "pointsUnit", _value: 92 },               // carry size or it resets to ~12pt
+      tracking: -10,                                           // 1/1000 em; negative tightens display type
+      color: { _obj: "RGBColor", red: 26, grain: 25, blue: 22 } } }] } }], "style");
+```
+Font = exact **PostScript name** (`Didot`, `HelveticaNeue-Bold`, `Baskerville-Italic`, `Georgia`); a missing face silently falls back. Picking a real display face + tracking + generous size is most of what makes output look designed rather than default. Capture exact descriptors via Alchemist when unsure.
 
 ## Solid & gradient fills — use a fill layer
 

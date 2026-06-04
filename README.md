@@ -12,6 +12,15 @@ Problem is, Photoshop has almost no agent tooling. UXP scripting is the modern n
 
 **Core principle:** `errors: []` ≠ correct. Only the rendered pixels are truth. Every non-trivial job is a loop — attempt → export preview → *look* → fix → re-render.
 
+## Gallery
+
+All three are **real Photoshop renders** produced by the scripts in [`examples/`](examples/) — each a different design language to show the range. Code + output committed side by side.
+
+| Editorial serif | Bold geometric | Cinematic B&W |
+|---|---|---|
+| ![](examples/01-new-poster/preview.jpg) | ![](examples/02-place-cover/preview.jpg) | ![](examples/03-photo-grade/preview.jpg) |
+| generate from nothing | place + cover a photo | non-destructive grade |
+
 ## What's inside
 
 ```

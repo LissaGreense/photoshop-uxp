@@ -1,0 +1,121 @@
+/* ============================================================================
+ * EXAMPLE 03 — Grade a photo: non-destructive editorial black & white
+ * Shows: place a photo, then NON-DESTRUCTIVE adjustment layers — Black & White
+ *        (weighted mix), a contrast Curves, and a vignette (a darkening Curves
+ *        masked with a radial gradient). Originals are never touched.
+ *
+ * Place needs an ABSOLUTE path. Point INPUT at this folder's source.jpg in
+ * your checkout, then run (Photoshop must be running):
+ *     APP=$(ls /Applications | grep -i '^Adobe Photoshop' | head -1)
+ *     open -a "$APP" "$(pwd)/grade.psjs"
+ * ========================================================================== */
+const { app, action, constants } = require("photoshop");
+const { localFileSystem: fs } = require("uxp").storage;
+const errors = [];
+
+async function bp(descriptors, label) {
+  const res = await action.batchPlay(descriptors, { continueOnError: true });
+  for (const r of res) {
+    if (r && r._obj === "error") errors.push({ label, message: r.message, result: r.result });
+  }
+  return res;
+}
+
+function snapshotLayer(layer) {
+  const n = {
+    id: layer.id, name: layer.name, kind: String(layer.kind),
+    visible: layer.visible, opacity: layer.opacity, blendMode: String(layer.blendMode),
+    bounds: layer.bounds && { left: layer.bounds.left, top: layer.bounds.top, right: layer.bounds.right, bottom: layer.bounds.bottom },
+  };
+  if (layer.kind === constants.LayerKind.TEXT) { try { n.text = layer.textItem.contents; } catch (e) {} }
+  if (layer.layers && layer.layers.length) n.children = layer.layers.map(snapshotLayer);
+  return n;
+}
+
+async function emit(doc, extra) {
+  const out = await fs.getTemporaryFolder();
+  try {
+    const pf = await out.createFile("preview.jpg", { overwrite: true });
+    await doc.saveAs.jpg(pf, { quality: 9 }, true);
+  } catch (e) { errors.push({ label: "emit preview", message: String(e) }); }
+  const state = {
+    document: { id: doc.id, name: doc.title, width: doc.width, height: doc.height, resolution: doc.resolution },
+    layers: doc.layers.map(snapshotLayer), errors, ...(extra || {}),
+  };
+  const sf = await out.createFile("state.json", { overwrite: true });
+  await sf.write(JSON.stringify(state, null, 2));
+}
+
+async function adjustment(doc, type, name) {  // make an adjustment layer; returns it (active)
+  await bp([{ _obj: "make", _target: [{ _ref: "adjustmentLayer" }],
+    using: { _obj: "adjustmentLayer", type } }], "adj " + name);
+  const layer = doc.activeLayers[0]; layer.name = name; return layer;
+}
+async function addText(doc, text, name, o) {
+  await doc.createTextLayer({ contents: text, position: { x: o.x, y: o.y }, name });
+  const [r, g, b] = o.color;
+  const style = { _obj: "textStyle", fontPostScriptName: o.font, fontName: o.font,
+    size: { _unit: "pointsUnit", _value: o.size }, color: { _obj: "RGBColor", red: r, grain: g, blue: b } };
+  if (o.tracking != null) style.tracking = o.tracking;
+  await bp([{ _obj: "set", _target: [{ _ref: "textLayer", _enum: "ordinal", _value: "targetEnum" }],
+    to: { _obj: "textLayer", textStyleRange: [{ _obj: "textStyleRange", from: 0, to: text.length, textStyle: style }] } }], "style " + name);
+}
+
+// ============================ YOUR WORK BELOW ===============================
+const INPUT = "/Users/sara/Projects/adobe_skills/examples/03-photo-grade/source.jpg";  // ← absolute path to this folder's source.jpg
+const W = 1600, H = 1000;
+
+const doc = await app.createDocument({ width: W, height: H, resolution: 72, name: "grade", fill: "black" });
+
+// Place the photo full-bleed (scale to COVER the whole canvas).
+const entry = await fs.getEntryWithUrl("file:" + INPUT);
+const token = await fs.createSessionToken(entry);
+await bp([{ _obj: "placeEvent", null: { _path: token, _kind: "local" },
+  freeTransformCenterState: { _enum: "quadCenterState", _value: "QCSAverage" } }], "place");
+const img = doc.activeLayers[0]; img.name = "photo";
+const b = img.bounds, pct = Math.max(W / (b.right - b.left), H / (b.bottom - b.top)) * 100;
+await bp([{ _obj: "transform", _target: [{ _ref: "layer", _enum: "ordinal", _value: "targetEnum" }],
+  freeTransformCenterState: { _enum: "quadCenterState", _value: "QCSAverage" },
+  width: { _unit: "percentUnit", _value: pct }, height: { _unit: "percentUnit", _value: pct },
+  interfaceIconFrameDimmed: { _enum: "interpolationType", _value: "bicubic" } }], "cover");
+const nb = img.bounds;
+img.translate(W / 2 - (nb.left + nb.right) / 2, H / 2 - (nb.top + nb.bottom) / 2);
+
+// 1) Black & White — a weighted mix (per-channel %), richer than a flat desaturate.
+await adjustment(doc, { _obj: "blackAndWhite", red: 40, yellow: 50, green: 40, cyan: 50, blue: 20, magenta: 70, useTint: false }, "B&W mix");
+
+// 2) Curves — contrast + slightly crushed blacks (filmic toe). horizontal=in, vertical=out (0–255).
+await adjustment(doc, { _obj: "curves", adjustment: [{ _obj: "curvesAdjustment",
+  channel: { _ref: "channel", _enum: "channel", _value: "composite" },
+  curve: [{ _obj: "paint", horizontal: 22, vertical: 0 }, { _obj: "paint", horizontal: 64, vertical: 40 },
+          { _obj: "paint", horizontal: 128, vertical: 128 }, { _obj: "paint", horizontal: 192, vertical: 205 },
+          { _obj: "paint", horizontal: 255, vertical: 255 }] }] }, "contrast");
+
+// 3) Vignette — a darkening Curves, masked with a radial gradient: black center
+//    (adjustment hidden) → white edges (adjustment shown). Select the mask
+//    CHANNEL and paint into it; then reselect RGB so later ops aren't stuck on the mask.
+await adjustment(doc, { _obj: "curves", adjustment: [{ _obj: "curvesAdjustment",
+  channel: { _ref: "channel", _enum: "channel", _value: "composite" },
+  curve: [{ _obj: "paint", horizontal: 0, vertical: 0 }, { _obj: "paint", horizontal: 128, vertical: 73 },
+          { _obj: "paint", horizontal: 255, vertical: 230 }] }] }, "vignette");
+await bp([{ _obj: "select", _target: [{ _ref: "channel", _enum: "channel", _value: "mask" }] }], "select mask");
+const cx = W / 2, cy = H / 2, radius = Math.max(W, H) * 0.62;
+await bp([{ _obj: "gradientClassEvent",
+  from: { _obj: "paint", horizontal: { _unit: "pixelsUnit", _value: cx }, vertical: { _unit: "pixelsUnit", _value: cy } },
+  to:   { _obj: "paint", horizontal: { _unit: "pixelsUnit", _value: cx }, vertical: { _unit: "pixelsUnit", _value: cy - radius } },
+  type: { _enum: "gradientType", _value: "radial" },
+  gradient: { _obj: "gradientClassEvent", gradientForm: { _enum: "gradientForm", _value: "customStops" }, interfaceIconFrameDimmed: 4096,
+    colors: [{ _obj: "colorStop", color: { _obj: "RGBColor", red: 0, grain: 0, blue: 0 }, type: { _enum: "colorStopType", _value: "userStop" }, location: 0, midpoint: 50 },
+             { _obj: "colorStop", color: { _obj: "RGBColor", red: 255, grain: 255, blue: 255 }, type: { _enum: "colorStopType", _value: "userStop" }, location: 4096, midpoint: 50 }],
+    transparency: [{ _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 100 }, location: 0, midpoint: 50 },
+                   { _obj: "transferSpec", opacity: { _unit: "percentUnit", _value: 100 }, location: 4096, midpoint: 50 }] } }], "paint vignette");
+await bp([{ _obj: "select", _target: [{ _ref: "channel", _enum: "channel", _value: "RGB" }] }], "reselect RGB");
+
+// STYLE: technical / cinematic — an ultra-thin grotesk title over a MONOSPACE
+// metadata line (contact-sheet feel), a third distinct type voice. Bottom-left
+// where the vignette goes dark, so the light type reads.
+await addText(doc, "A Study in Grey", "title", { x: 80, y: H - 110, size: 78, tracking: 0, font: "HelveticaNeue-UltraLight", color: [245, 245, 242] });
+await addText(doc, "N° 03   ·   f8   ·   1/250s   ·   ISO 100", "meta", { x: 84, y: H - 56, size: 22, tracking: 80, font: "Menlo-Regular", color: [196, 196, 192] });
+
+await emit(doc, { note: "03 — non-destructive B&W grade, technical caption" });
+// ===========================================================================

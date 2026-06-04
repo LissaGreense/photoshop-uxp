@@ -1,0 +1,107 @@
+/* ============================================================================
+ * EXAMPLE 02 — Place a photo into an editorial cover (photo / paper split)
+ * Shows: place an external image (session token), scale-to-COVER a band +
+ *        recenter, a clean paper divide (no muddy scrim), and editorial type.
+ *
+ * Place needs an ABSOLUTE path. Point INPUT at this folder's source.jpg in
+ * your checkout, then run (Photoshop must be running):
+ *     APP=$(ls /Applications | grep -i '^Adobe Photoshop' | head -1)
+ *     open -a "$APP" "$(pwd)/cover.psjs"
+ * ========================================================================== */
+const { app, action, constants } = require("photoshop");
+const { localFileSystem: fs } = require("uxp").storage;
+const errors = [];
+
+async function bp(descriptors, label) {
+  const res = await action.batchPlay(descriptors, { continueOnError: true });
+  for (const r of res) {
+    if (r && r._obj === "error") errors.push({ label, message: r.message, result: r.result });
+  }
+  return res;
+}
+
+function snapshotLayer(layer) {
+  const n = {
+    id: layer.id, name: layer.name, kind: String(layer.kind),
+    visible: layer.visible, opacity: layer.opacity, blendMode: String(layer.blendMode),
+    bounds: layer.bounds && { left: layer.bounds.left, top: layer.bounds.top, right: layer.bounds.right, bottom: layer.bounds.bottom },
+  };
+  if (layer.kind === constants.LayerKind.TEXT) { try { n.text = layer.textItem.contents; } catch (e) {} }
+  if (layer.layers && layer.layers.length) n.children = layer.layers.map(snapshotLayer);
+  return n;
+}
+
+async function emit(doc, extra) {
+  const out = await fs.getTemporaryFolder();
+  try {
+    const pf = await out.createFile("preview.jpg", { overwrite: true });
+    await doc.saveAs.jpg(pf, { quality: 9 }, true);
+  } catch (e) { errors.push({ label: "emit preview", message: String(e) }); }
+  const state = {
+    document: { id: doc.id, name: doc.title, width: doc.width, height: doc.height, resolution: doc.resolution },
+    layers: doc.layers.map(snapshotLayer), errors, ...(extra || {}),
+  };
+  const sf = await out.createFile("state.json", { overwrite: true });
+  await sf.write(JSON.stringify(state, null, 2));
+}
+
+async function selectRect(t, l, b, r) {
+  await bp([{ _obj: "set", _target: [{ _ref: "channel", _property: "selection" }],
+    to: { _obj: "rectangle", top: { _unit: "pixelsUnit", _value: t }, left: { _unit: "pixelsUnit", _value: l },
+          bottom: { _unit: "pixelsUnit", _value: b }, right: { _unit: "pixelsUnit", _value: r } } }], "select rect");
+}
+async function deselect() {
+  await bp([{ _obj: "set", _target: [{ _ref: "channel", _property: "selection" }],
+    to: { _enum: "ordinal", _value: "none" } }], "deselect");
+}
+async function fillLayer(doc, [r, g, b], name) {
+  await bp([{ _obj: "make", _target: [{ _ref: "contentLayer" }],
+    using: { _obj: "contentLayer", type: { _obj: "solidColorLayer", color: { _obj: "RGBColor", red: r, grain: g, blue: b } } } }], "fill " + name);
+  const layer = doc.activeLayers[0]; layer.name = name; return layer;
+}
+async function addText(doc, text, name, o) {  // font/size/tracking/color all explicit — nothing is inherited
+  await doc.createTextLayer({ contents: text, position: { x: o.x, y: o.y }, name });
+  const [r, g, b] = o.color;
+  const style = { _obj: "textStyle", fontPostScriptName: o.font, fontName: o.font,
+    size: { _unit: "pointsUnit", _value: o.size }, color: { _obj: "RGBColor", red: r, grain: g, blue: b } };
+  if (o.tracking != null) style.tracking = o.tracking;
+  await bp([{ _obj: "set", _target: [{ _ref: "textLayer", _enum: "ordinal", _value: "targetEnum" }],
+    to: { _obj: "textLayer", textStyleRange: [{ _obj: "textStyleRange", from: 0, to: text.length, textStyle: style }] } }], "style " + name);
+}
+
+// ============================ YOUR WORK BELOW ===============================
+// STYLE: bold / geometric — a flat color band and heavy Futura caps (a totally
+// different voice from 01's editorial serif). Same place/cover mechanics.
+const INPUT = "/Users/sara/Projects/adobe_skills/examples/02-place-cover/source.jpg";  // ← absolute path to this folder's source.jpg
+const W = 1600, H = 900, M = 90, SPLIT = 560;      // photo fills the top to SPLIT; color band below
+const OXBLOOD = [112, 40, 36], CREAM = [241, 236, 226], GOLD = [201, 162, 92];
+
+const doc = await app.createDocument({ width: W, height: H, resolution: 72, name: "cover", fill: "white" });
+await deselect();
+await fillLayer(doc, OXBLOOD, "base");             // base layer — any gap reads as the band color
+
+// Place the photo; scale to COVER the top band (W × SPLIT), then recenter into it.
+const entry = await fs.getEntryWithUrl("file:" + INPUT);   // single slash after file:
+const token = await fs.createSessionToken(entry);
+await bp([{ _obj: "placeEvent", null: { _path: token, _kind: "local" },
+  freeTransformCenterState: { _enum: "quadCenterState", _value: "QCSAverage" } }], "place");
+const img = doc.activeLayers[0]; img.name = "photo";
+const b = img.bounds, pct = Math.max(W / (b.right - b.left), SPLIT / (b.bottom - b.top)) * 100;
+await bp([{ _obj: "transform", _target: [{ _ref: "layer", _enum: "ordinal", _value: "targetEnum" }],
+  freeTransformCenterState: { _enum: "quadCenterState", _value: "QCSAverage" },
+  width: { _unit: "percentUnit", _value: pct }, height: { _unit: "percentUnit", _value: pct },
+  interfaceIconFrameDimmed: { _enum: "interpolationType", _value: "bicubic" } }], "cover");
+const nb = img.bounds;
+img.translate(W / 2 - (nb.left + nb.right) / 2, SPLIT / 2 - (nb.top + nb.bottom) / 2);
+
+// Flat color band over the photo's lower edge → a crisp, intentional divide (not a scrim).
+await selectRect(SPLIT, 0, H, W);
+await fillLayer(doc, OXBLOOD, "band");
+await deselect();
+
+// Bold geometric type: heavy condensed Futura caps + a tracked label.
+await addText(doc, "FIELD NOTES · 02", "kicker", { x: M, y: SPLIT + 75, size: 26, tracking: 280, font: "Futura-Medium", color: GOLD });
+await addText(doc, "STILL WATERS", "title", { x: M, y: SPLIT + 215, size: 120, tracking: 20, font: "Futura-CondensedExtraBold", color: CREAM });
+
+await emit(doc, { note: "02 — bold geometric photo cover" });
+// ===========================================================================
