@@ -34,7 +34,7 @@ photoshop-uxp/
 ## Key facts it encodes
 
 - A `.psjs` script is **already modal** — call DOM/batchPlay directly, never wrap edits in `core.executeAsModal` (that's plugins only).
-- **Autonomous trigger:** `open -a "Adobe Photoshop 2025" /abs/path/script.psjs` executes the script with no manual clicking; Photoshop must be running.
+- **Autonomous trigger:** `open -a "$(ls /Applications | grep -i '^Adobe Photoshop' | head -1)" /abs/path/script.psjs` executes the script with no manual clicking; Photoshop must be running.
 - **Readback:** scripts can't return stdout, so they emit `preview.jpg` (vision) + `state.json` (layer tree, errors) to the temp folder; the agent finds the newest by mtime.
 - Validated `batchPlay` recipes for solid/gradient fills, image placement (session tokens), non-destructive adjustments (curves, B&W, vignette), compound selections, masks, and smart objects — including quirks like the `RGBColor` `grain` (green) key and the `\n`-renders-as-tofu trap.
 - Sizing heuristics (margins, type scale, line length, contrast) so the first attempt isn't amateur.
@@ -51,7 +51,7 @@ Or grab it manually — drop the `photoshop-uxp/` directory into your agent's sk
 
 ## Requirements
 
-- Photoshop 23.5+ (recipes verified against PS 2025 / 2026)
+- Photoshop 23.5+ (any recent release — the patterns aren't tied to a specific year)
 - macOS examples use `open -a`; the patterns transfer to Windows with the equivalent launch
 
 ## Status

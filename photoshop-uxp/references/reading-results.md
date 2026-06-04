@@ -12,10 +12,11 @@ Write to the **temporary folder** — no permission prompt (arbitrary paths trig
 ```
 /var/folders/.../T/Adobe/UXP/PluginsStorage/PHSP/<version>/External/<NNNNN>/PluginData/
 ```
-`<version>` = PS major (26 = 2025, 27 = 2026). **`<NNNNN>` increments every run** — never hardcode it. Find the latest output by mtime:
+`<version>` is the PS major (tracks the installed release) and **`<NNNNN>` increments every run** — never hardcode either. The find glob below stays version-agnostic; just take the newest match by mtime:
 ```bash
 touch /tmp/marker
-open -a "Adobe Photoshop 2025" /abs/path/script.psjs    # returns immediately; script writes in ~1-5s
+APP=$(ls /Applications | grep -i '^Adobe Photoshop' | head -1)
+open -a "$APP" /abs/path/script.psjs                    # returns immediately; script writes in ~1-5s
 find /var/folders -path '*Adobe/UXP/PluginsStorage*External*' -name state.json -newer /tmp/marker 2>/dev/null | head -1
 ```
 Read `preview.jpg` + `state.json` from that dir. Always take the newest match.

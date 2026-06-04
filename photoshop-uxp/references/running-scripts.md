@@ -15,16 +15,18 @@ Use a `.psjs` for "do this edit, produce output." Use a **plugin** only for netw
 ## Trigger autonomously (no headless mode needed)
 
 ```bash
-open -a "Adobe Photoshop 2025" /abs/path/script.psjs    # app name must match the install
+# discover whatever Photoshop is installed — don't hardcode a year
+APP=$(ls /Applications | grep -i '^Adobe Photoshop' | head -1)
+open -a "$APP" /abs/path/script.psjs
 ```
-`open -a` sends the same open-document event as dropping the file on the app icon → Photoshop **executes** the `.psjs` (~1–5s). Photoshop must already be running. `open` returns immediately and does NOT wait — poll for output by mtime ([reading-results.md](reading-results.md)). Re-running re-executes in a fresh context.
+The app name is whatever the user has (`Adobe Photoshop 2024/2025/2026`, `(Beta)`, …) — resolve it, don't assume. `open -a` sends the same open-document event as dropping the file on the app icon → Photoshop **executes** the `.psjs` (~1–5s). Photoshop must already be running. `open` returns immediately and does NOT wait — poll for output by mtime ([reading-results.md](reading-results.md)). Re-running re-executes in a fresh context.
 
 Manual alternatives: File → Scripts → Browse; drag onto the dock icon; play from an Action.
 
 ## Other transports (when `open -a` doesn't fit)
 
 - **Persistent plugin** (live bridge): a plugin opens a WebSocket/fetch **client** to a local relay (the `adb-mcp` model). UXP is never a socket *server*, so a relay always sits in the middle. For long-lived sessions vs one-shots.
-- **AppleScript → Action → `.psjs`**: works, but PS 2025+ is deprecating AppleScript — prefer `open -a`.
+- **AppleScript → Action → `.psjs`**: works, but recent Photoshop versions are deprecating AppleScript — prefer `open -a`.
 
 ## macOS networking gotcha
 

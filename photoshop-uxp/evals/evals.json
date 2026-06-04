@@ -1,6 +1,6 @@
 {
   "skill_name": "photoshop-uxp",
-  "note": "Each eval is run by authoring a .psjs, triggering it with `open -a \"Adobe Photoshop 2025\" <file>`, then reading back preview.jpg + state.json. Success is judged on the RENDERED preview, not errors:[].",
+  "note": "Each eval is run by authoring a .psjs, triggering it with `open -a \"<installed Adobe Photoshop>\" <file>`, then reading back preview.jpg + state.json. Success is judged on the RENDERED preview, not errors:[].",
   "evals": [
     {
       "id": 1,

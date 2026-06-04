@@ -3,7 +3,8 @@
  *
  * A .psjs runs ALREADY-MODAL: call DOM/batchPlay directly, NO core.executeAsModal.
  * Top-level await is allowed. Trigger it (Photoshop must be running):
- *     open -a "Adobe Photoshop 2025" /abs/path/to/this.psjs   # match the installed version
+ *     APP=$(ls /Applications | grep -i '^Adobe Photoshop' | head -1)  # whatever's installed
+ *     open -a "$APP" /abs/path/to/this.psjs
  * It writes preview.jpg + state.json to the temp folder. console.log is NOT
  * visible externally — find the output on disk by mtime instead:
  *     find /var/folders -path '*Adobe/UXP/PluginsStorage*External*' \
