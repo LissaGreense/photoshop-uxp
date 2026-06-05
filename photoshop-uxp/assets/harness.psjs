@@ -105,12 +105,15 @@ async function emit(doc, extra) {
 //    opacity is 0-255 here (not the DOM's 0-100). For flat opacity/bounds/textColor, the
 //    snapshotLayer() fields already in state.json are easier; use readback() for the gaps.
 //
-// 4) Clean up so you don't pile up tabs: if you CREATED this doc, close it after
-//    emitting. NEVER close a document the user already had open — that's their work.
+// 4) Teardown: LEAVE THE RESULT OPEN so the user can review it in Photoshop and ask
+//    for more iterations — confirm with them before closing it. Auto-close only
+//    throwaway scratch, and in BATCH runs close each file after export. NEVER close
+//    a document the user already had open — that's their work.
 
 // const doc = ...;
 // ... your edits, each batchPlay call wrapped in bp(...) ...
 
 // await emit(doc, { note: "what this run produced" });
-// await doc.closeWithoutSaving();   // ONLY if you created it (skip when editing the user's open doc)
+// Leave `doc` open for the user. Close only after they confirm, or for scratch/batch:
+// await doc.closeWithoutSaving();
 // ===========================================================================

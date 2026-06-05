@@ -36,7 +36,9 @@ How you acquired the doc decides how you treat it through the whole loop and how
 | Edits | anything goes | **non-destructive** — adjustment layers, duplicate before mutating, don't flatten |
 | Atomicity | nice to have | **required** — wrap the run in history suspension so it's one undo |
 | Preview | `emit()` as a copy | `emit()` as a copy — never alter the doc to render |
-| Teardown | **close it** (`await doc.closeWithoutSaving()`) or tabs pile up across runs | **never** close or save over it — leave it exactly recoverable |
+| Teardown | **leave the result open** for the user to inspect in Photoshop — **ask before closing** | **never** close or save over it — leave it exactly recoverable |
+
+A one-off deliverable is the user's to review: leave the result document open so they can look at it in Photoshop and ask for more iterations, and **confirm before you close it**. Do clean up after yourself otherwise — auto-close genuine throwaway scratch (probes, intermediate temp docs) and, in **batch** runs, close each file after exporting (no per-file review, so leaving dozens of tabs open is the worse outcome). The rule of thumb: *if it's the thing the user asked for, leave it and ask; if it's scaffolding, clean it.*
 
 The verify loop is the same either way — **attempt → emit → look → adjust** — but on the user's doc every iteration must stay undoable, and you exit having added recoverable layers, not having replaced their work.
 
@@ -67,5 +69,5 @@ Starting points, not laws — render and adjust.
 - [ ] DOM where it exists, batchPlay where it doesn't
 - [ ] Multi-step edits wrapped in history suspension (undo as one unit)
 - [ ] emit() preview + state at the end; rendered and actually looked at
-- [ ] Teardown: closed docs you created; left the user's open doc untouched & recoverable
+- [ ] Teardown: left the result doc open for review & asked before closing; auto-closed only batch/scratch; left the user's open doc untouched & recoverable
 ```
