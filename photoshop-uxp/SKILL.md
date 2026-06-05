@@ -55,7 +55,7 @@ Starting points, not laws — render and adjust.
 
 - [layers-and-composition.md](references/layers-and-composition.md) — layers, text, groups, masks, smart objects, transforms; solid/gradient **fills**; **placing images**; **adjustment layers** (curves, B&W, vignette/local grades); **selections** (combining, non-rect shapes). The main surface.
 - [batchplay.md](references/batchplay.md) — descriptor anatomy, capturing descriptors, reading returns.
-- [reading-results.md](references/reading-results.md) — preview + state JSON, finding output on disk.
+- [reading-results.md](references/reading-results.md) — preview + state JSON, the `readback()` structured-truth channel (text color, bounds, any AM property), finding output on disk.
 - [running-scripts.md](references/running-scripts.md) — script vs plugin, the `open -a` trigger.
 - [gotchas.md](references/gotchas.md) — modal scope, macOS networking, units, history, async. Check before debugging.
 

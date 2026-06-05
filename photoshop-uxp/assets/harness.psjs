@@ -24,6 +24,32 @@ async function bp(descriptors, label) {
   return res;
 }
 
+/** Read raw Action-Manager properties off a target the DOM doesn't expose well.
+ *  This is the ScriptListener/Alchemist trick distilled: a `multiGet` get-descriptor.
+ *    target: a _ref chain, e.g. [{_ref:"layer",_id:5}, {_ref:"document",_enum:"ordinal"}]
+ *    props:  string[] of property names, e.g. ["opacity","bounds","mode"]
+ *  Returns the property descriptor ({} on failure — recorded in errors), giving a
+ *  STRUCTURED second channel of truth alongside the preview pixels. */
+async function readback(target, props, label) {
+  try {
+    const [res] = await action.batchPlay(
+      [{ _obj: "multiGet", _target: target,
+         extendedReference: [props], options: { failOnMissingProperty: false } }],
+      { continueOnError: true });
+    if (res && res._obj === "error") { errors.push({ label: label || "readback", message: res.message }); return {}; }
+    return res || {};
+  } catch (e) { errors.push({ label: label || "readback", message: String(e) }); return {}; }
+}
+
+/** A text layer's fill color via the DOM (since 24.1). The #1 verification gap:
+ *  "errors:[] but the text is black-on-black." Returns {red,green,blue} 0-255 or null. */
+function textColor(layer) {
+  try {
+    const c = layer.textItem.characterStyle.color.rgb;
+    return { red: Math.round(c.red), green: Math.round(c.green), blue: Math.round(c.blue) };
+  } catch (e) { return null; }
+}
+
 /** Recursively snapshot a layer to plain JSON for the readback contract. */
 function snapshotLayer(layer) {
   const n = {
@@ -34,7 +60,10 @@ function snapshotLayer(layer) {
       right: layer.bounds.right, bottom: layer.bounds.bottom,
     },
   };
-  if (layer.kind === constants.LayerKind.TEXT) { try { n.text = layer.textItem.contents; } catch (e) {} }
+  if (layer.kind === constants.LayerKind.TEXT) {
+    try { n.text = layer.textItem.contents; } catch (e) {}
+    n.textColor = textColor(layer);   // so the agent can catch invisible text without eyeballing
+  }
   if (layer.layers && layer.layers.length) n.children = layer.layers.map(snapshotLayer);
   return n;
 }
@@ -67,6 +96,14 @@ async function emit(doc, extra) {
 //    See references/layers-and-composition.md (fills, images, adjustments, selections, text).
 //
 // 3) Mind general sizing/contrast (SKILL.md), then VERIFY by rendering — never trust errors:[].
+//    state.json already carries each layer's bounds/opacity + text color. For anything
+//    else the DOM hides, read it straight back with readback():
+//      const layerRef = [{ _ref: "layer", _enum: "ordinal", _value: "targetEnum" },
+//                        { _ref: "document", _enum: "ordinal", _value: "targetEnum" }];
+//      const got = await readback(layerRef, ["opacity", "bounds", "layerID"], "active layer");
+//    NOTE: raw AM, not DOM — values are unit-wrapped ({_value, _unit}, read ._value) and
+//    opacity is 0-255 here (not the DOM's 0-100). For flat opacity/bounds/textColor, the
+//    snapshotLayer() fields already in state.json are easier; use readback() for the gaps.
 //
 // 4) Clean up so you don't pile up tabs: if you CREATED this doc, close it after
 //    emitting. NEVER close a document the user already had open — that's their work.
